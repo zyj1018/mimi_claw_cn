@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MimiClaw 项目代码分析</title>
+    <!-- 使用 Mermaid v9.3.0 兼容性更好，v10+ 需要 ESM 模块 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/9.3.0/mermaid.min.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f4f4f9;
+        }
+        h1, h2, h3 {
+            color: #2c3e50;
+        }
+        h1 {
+            text-align: center;
+            border-bottom: 2px solid #3498db;
+            padding-bottom: 10px;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        .chart-container {
+            overflow-x: auto;
+            text-align: center;
+        }
+        code {
+            background-color: #eee;
+            padding: 2px 4px;
+            border-radius: 4px;
+            font-family: 'Courier New', Courier, monospace;
+        }
+        .file-link {
+            color: #3498db;
+            text-decoration: none;
+        }
+        .file-link:hover {
+            text-decoration: underline;
+        }
+        .highlight {
+            color: #e74c3c;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>MimiClaw 项目代码全景分析</h1>
+    
+    <div class="container">
+        <h2>1. 项目概览</h2>
+        <p><strong>MimiClaw</strong> 是一个基于 <strong>ESP32-S3</strong> 的嵌入式 AI 智能体固件。它利用 <strong>FreeRTOS</strong> 进行任务调度，通过 C 语言实现了一套完整的 ReAct (Reasoning and Acting) 循环，使其能够像 Claude 一样进行思考和行动。</p>
+        <ul>
+            <li><strong>核心语言</strong>: C (ESP-IDF 框架)</li>
+            <li><strong>操作系统</strong>: FreeRTOS</li>
+            <li><strong>关键功能</strong>: 消息总线、LLM 代理调用、工具执行、多渠道通信 (Telegram/WebSocket/Serial)</li>
+        </ul>
+    </div>
+
+    <div class="container">
+        <h2>2. 系统架构图 (System Architecture)</h2>
+        <p>该图展示了系统的主要模块及其交互关系。系统以 <code>app_main</code> 为入口，初始化硬件和各个子系统，并通过 FreeRTOS 任务和队列进行通信。</p>
+        <div class="mermaid chart-container">
+graph TD
+    subgraph Hardware ["硬件层"]
+        ESP32["ESP32-S3 SoC"]
+        Flash["SPI Flash (NVS/SPIFFS)"]
+        WiFi["WiFi 模组"]
+        IMU["IMU 传感器"]
+        Btn["按键"]
+    end
+
+    subgraph Core ["核心层"]
+        Main["mimi.c (app_main)"]
+        MsgBus["message_bus (Queue)"]
+        Agent["agent_loop (ReAct Engine)"]
+        LLM["llm_proxy (Claude API)"]
+    end
+
+    subgraph Services ["服务层"]
+        TG["telegram_bot"]
+        WS["ws_server"]
+        CLI["serial_cli"]
+        Tools["tool_registry"]
+    end
+
+    Main -->|Init| Flash
+    Main -->|Init| WiFi
+    Main -->|Start Task| TG
+    Main -->|Start Task| Agent
+    Main -->|Start Task| WS
+
+    TG <-->|Msg| MsgBus
+    WS <-->|Msg| MsgBus
+    CLI <-->|Msg| MsgBus
+
+    MsgBus <-->|Dispatch| Agent
+    Agent -->|Request| LLM
+    Agent -->|Execute| Tools
+    Tools -->|Result| Agent
+    
+    LLM -->|HTTPS| WiFi
+    WiFi -->|Network| Cloud["Claude API / Telegram API"]
+    </div>
+    </div>
+
+    <div class="container">
+        <h2>3. 核心数据流 (Core Data Flow)</h2>
+        <p>展示了一条消息从用户输入到 AI 回复的完整生命周期。核心结构体是 <code>mimi_msg_t</code>。</p>
+        <div class="mermaid chart-container">
+sequenceDiagram
+    participant User as 用户 (User)
+    participant Input as 输入通道 (Telegram/WS)
+    participant Bus as 消息总线 (Message Bus)
+    participant Agent as 智能体循环 (Agent Loop)
+    participant Context as 上下文构建 (Context Builder)
+    participant LLM as Claude API
+    participant Tools as 工具集 (Tools)
+
+    User->>Input: 发送消息 "查一下天气"
+    Input->>Bus: 封装 mimi_msg_t (Inbound)
+    Bus->>Agent: 路由消息
+    
+    rect rgb(240, 248, 255)
+        note right of Agent: ReAct 循环开始
+        Agent->>Context: 读取历史 & 性格 (SOUL.md)
+        Context-->>Agent: 生成 Prompt
+        Agent->>LLM: 发送请求 (含工具定义)
+        LLM-->>Agent: 返回 "Tool Call: get_weather"
+        Agent->>Tools: 执行 tool_web_search / get_weather
+        Tools-->>Agent: 返回 "晴转多云, 25℃"
+        Agent->>LLM: 发送工具结果
+        LLM-->>Agent: 返回 "今天天气不错..."
+    end
+
+    Agent->>Bus: 封装 mimi_msg_t (Outbound)
+    Bus->>Input: 路由回复
+    Input->>User: 显示回复
+        </div>
+    </div>
+
+    <div class="container">
+        <h2>4. 文件结构与模块分布</h2>
+        <p>项目的关键文件组织结构。</p>
+        <div class="mermaid chart-container">
+graph LR
+    root((MimiClaw))
+    
+    root --> Main[main 核心代码]
+    
+    Main --> Mimi[mimi.c<br/>入口 app_main]
+    
+    Main --> Agent[agent 智能体逻辑]
+    Agent --> A1[agent_loop.c]
+    Agent --> A2[context_builder.c]
+    
+    Main --> Bus[bus 通信总线]
+    Bus --> B1[message_bus.c]
+    
+    Main --> LLM_Mod[llm 大模型接口]
+    LLM_Mod --> L1[llm_proxy.c]
+    
+    Main --> Tool_Mod[tools 工具系统]
+    Tool_Mod --> T1[tool_registry.c]
+    Tool_Mod --> T2[tool_web_search.c]
+    
+    Main --> TG_Mod[telegram TG机器人]
+    TG_Mod --> TG1[telegram_bot.c]
+    
+    Main --> GW_Mod[gateway 网关]
+    GW_Mod --> GW1[ws_server.c]
+    
+    Main --> CLI_Mod[cli 命令行]
+    CLI_Mod --> C1[serial_cli.c]
+    
+    root --> Data[spiffs_data 静态数据]
+    Data --> D1[SOUL.md 性格]
+    Data --> D2[USER.md 用户]
+    Data --> D3[MEMORY.md 记忆]
+    
+    root --> Docs[docs 文档]
+    Docs --> Doc1[ARCHITECTURE.md]
+        </div>
+    </div>
+
+    <div class="container">
+        <h2>5. 关键代码解析</h2>
+        <h3>入口函数 <code>app_main</code></h3>
+        <p>位于 <code>main/mimi.c</code>，负责系统的“冷启动”。它按顺序初始化 NVS -> SPIFFS -> WiFi -> 消息总线 -> 各个服务任务。</p>
+        
+        <h3>智能体循环 <code>agent_loop</code></h3>
+        <p>位于 <code>main/agent/agent_loop.c</code>。这是一个无限循环的任务，它不断检查消息队列。一旦收到消息，它就会维护一个对话上下文，并根据 LLM 的返回结果决定是继续调用工具还是输出最终回复。</p>
+        
+        <h3>消息总线 <code>message_bus</code></h3>
+        <p>位于 <code>main/bus/message_bus.c</code>。使用 FreeRTOS 的 <code>xQueueSend</code> 和 <code>xQueueReceive</code> 实现。它解耦了通信协议（Telegram/WebSocket）与业务逻辑（Agent），使得增加新的通信方式变得非常简单。</p>
+    </div>
+
+    <script>
+        mermaid.initialize({ startOnLoad: true, theme: 'default', securityLevel: 'loose' });
+    </script>
+</body>
+</html>

@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MimiClaw 使用帮助与配置指南</title>
+    <style>
+        :root {
+            --primary-color: #2c3e50;
+            --accent-color: #3498db;
+            --bg-color: #f8f9fa;
+            --text-color: #333;
+            --code-bg: #2d2d2d;
+            --code-text: #ccc;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            line-height: 1.6;
+            color: var(--text-color);
+            background-color: var(--bg-color);
+            margin: 0;
+            padding: 0;
+        }
+        .container {
+            max-width: 960px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #fff;
+            box-shadow: 0 0 10px rgba(0,0,0,0.05);
+        }
+        header {
+            text-align: center;
+            padding: 40px 0;
+            border-bottom: 1px solid #eee;
+            margin-bottom: 40px;
+        }
+        h1 {
+            color: var(--primary-color);
+            margin: 0;
+            font-size: 2.5em;
+        }
+        h2 {
+            color: var(--primary-color);
+            border-left: 5px solid var(--accent-color);
+            padding-left: 15px;
+            margin-top: 40px;
+        }
+        h3 {
+            color: #555;
+            margin-top: 30px;
+        }
+        .step {
+            margin-bottom: 30px;
+            padding: 20px;
+            background: #fff;
+            border: 1px solid #e1e4e8;
+            border-radius: 6px;
+        }
+        .step-number {
+            display: inline-block;
+            background: var(--accent-color);
+            color: #fff;
+            width: 30px;
+            height: 30px;
+            text-align: center;
+            line-height: 30px;
+            border-radius: 50%;
+            margin-right: 10px;
+            font-weight: bold;
+        }
+        .step-title {
+            font-weight: bold;
+            font-size: 1.2em;
+            color: var(--primary-color);
+        }
+        code {
+            background: #f0f0f0;
+            padding: 2px 5px;
+            border-radius: 3px;
+            font-family: Consolas, Monaco, "Andale Mono", monospace;
+            color: #e74c3c;
+        }
+        pre {
+            background: var(--code-bg);
+            color: var(--code-text);
+            padding: 15px;
+            border-radius: 5px;
+            overflow-x: auto;
+            font-family: Consolas, Monaco, "Andale Mono", monospace;
+        }
+        .img-placeholder {
+            background: #ecf0f1;
+            border: 2px dashed #bdc3c7;
+            color: #7f8c8d;
+            padding: 40px;
+            text-align: center;
+            margin: 20px 0;
+            border-radius: 8px;
+            position: relative;
+        }
+        .img-placeholder::after {
+            content: "📷 截图位置";
+            display: block;
+            font-size: 1.2em;
+            margin-bottom: 10px;
+        }
+        .img-placeholder img {
+            max-width: 100%;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            display: none; /* 隐藏实际图片标签，直到用户替换 */
+        }
+        /* 当用户放入图片后，移除 placeholder 样式 */
+        img.screenshot {
+            max-width: 100%;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            margin: 20px 0;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            display: block;
+        }
+        .note {
+            background: #fff3cd;
+            border-left: 4px solid #ffc107;
+            padding: 15px;
+            margin: 20px 0;
+            color: #856404;
+        }
+        .nav-links {
+            position: sticky;
+            top: 20px;
+            float: right;
+            background: #fff;
+            padding: 15px;
+            border: 1px solid #eee;
+            border-radius: 5px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+        }
+        .nav-links ul {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        .nav-links li {
+            margin-bottom: 10px;
+        }
+        .nav-links a {
+            color: var(--accent-color);
+            text-decoration: none;
+        }
+        .nav-links a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <header>
+        <h1>MimiClaw 使用与配置指南</h1>
+        <p>基于 ESP32-S3 的口袋 AI 助理完整设置教程</p>
+    </header>
+
+    <div class="nav-links">
+        <h3>目录</h3>
+        <ul>
+            <li><a href="#quick-start">快速开始</a></li>
+            <li><a href="#token-config">Token 配置流程</a></li>
+            <li><a href="#feishu-setup">飞书 (Feishu) 接入详解</a></li>
+            <li><a href="#cli-usage">常用指令参考</a></li>
+        </ul>
+    </div>
+
+    <section id="quick-start">
+        <h2>🚀 快速开始</h2>
+        <div class="step">
+            <span class="step-number">1</span>
+            <span class="step-title">硬件连接</span>
+            <p>使用 USB Type-C 数据线将 ESP32-S3 开发板连接到电脑。请务必连接标有 <strong>USB</strong> 的接口（原生 USB），而非 COM/UART 接口。</p>
+            <div class="img-placeholder">
+                <p>请在此处插入：开发板连接示意图，标注出正确的 USB 接口位置</p>
+                <img class="screenshot" src="assets/hardware-connection.png" alt="硬件连接示意图">
+            </div>
+        </div>
+        <div class="step">
+            <span class="step-number">2</span>
+            <span class="step-title">确认串口</span>
+            <p>连接成功后，在电脑设备管理器（Windows）或终端（macOS/Linux）中确认设备已识别。</p>
+            <pre>
+# macOS/Linux
+ls /dev/cu.usb*
+# 预期输出: /dev/cu.usbmodem11401
+            </pre>
+        </div>
+    </section>
+
+    <section id="token-config">
+        <h2>🔑 Token 配置流程</h2>
+        
+        <h3>Telegram Bot Token 获取</h3>
+        <div class="step">
+            <p>1. 在 Telegram 中搜索 <code>@BotFather</code>，点击 Start。</p>
+            <p>2. 发送 <code>/newbot</code> 命令，按照提示输入机器人名称（Name）和用户名（Username）。</p>
+            <p>3. 获取红色的 HTTP API Token。</p>
+            <div class="img-placeholder">
+                <p>请在此处插入：BotFather 对话截图，圈出 API Token</p>
+                <img class="screenshot" src="assets/botfather-token.png" alt="BotFather Token 截图">
+            </div>
+        </div>
+
+        <h3>LLM API Key 获取</h3>
+        <div class="step">
+            <p>支持 Anthropic (Claude) 和 OpenAI (GPT) 及其兼容模型（如 DeepSeek/Moonshot）。</p>
+            <ul>
+                <li><strong>Anthropic:</strong> 访问 <a href="https://console.anthropic.com" target="_blank">console.anthropic.com</a> 创建 API Key。</li>
+                <li><strong>OpenAI:</strong> 访问 <a href="https://platform.openai.com" target="_blank">platform.openai.com</a> 创建 API Key。</li>
+                <li><strong>Moonshot/DeepSeek:</strong> 访问各自的开放平台获取 Key 和 Endpoint URL。</li>
+            </ul>
+        </div>
+    </section>
+
+    <section id="feishu-setup">
+        <h2>🦅 飞书 (Feishu) 接入详解</h2>
+        <p>MimiClaw 支持飞书企业自建应用，通过 WebSocket 模式实现内网穿透，无需公网 IP。</p>
+
+        <div class="step">
+            <span class="step-number">1</span>
+            <span class="step-title">创建企业自建应用</span>
+            <p>登录 <a href="https://open.feishu.cn/app" target="_blank">飞书开放平台开发者后台</a>，点击“创建企业自建应用”。</p>
+            <p>填写应用名称（如“MimiClaw助理”）和描述，点击创建。</p>
+            <div class="img-placeholder">
+                <p>请在此处插入：飞书开放平台创建应用页面截图</p>
+                <img class="screenshot" src="assets/feishu-create-app.png" alt="创建飞书应用">
+            </div>
+        </div>
+
+        <div class="step">
+            <span class="step-number">2</span>
+            <span class="step-title">添加机器人能力</span>
+            <p>在左侧菜单点击“添加应用能力”，找到“机器人”卡片，点击“添加”。</p>
+            <div class="img-placeholder">
+                <p>请在此处插入：添加机器人能力页面截图</p>
+                <img class="screenshot" src="assets/feishu-add-bot.png" alt="添加机器人能力">
+            </div>
+        </div>
+
+        <div class="step">
+            <span class="step-number">3</span>
+            <span class="step-title">配置权限</span>
+            <p>进入“权限管理”，搜索并开通以下三个核心权限：</p>
+            <ul>
+                <li><code>im:message</code> (获取用户发给机器人的单聊消息)</li>
+                <li><code>im:message:group_at_msg</code> (获取群聊中 @机器人的消息)</li>
+                <li><code>im:message:send_as_bot</code> (以应用身份发送消息)</li>
+            </ul>
+            <p class="note">⚠️ 配置完成后，必须点击页面顶部的“创建版本”并发布，权限才会生效！</p>
+            <div class="img-placeholder">
+                <p>请在此处插入：权限配置页面截图，高亮上述三个权限</p>
+                <img class="screenshot" src="assets/feishu-permissions.png" alt="飞书权限配置">
+            </div>
+        </div>
+
+        <div class="step">
+            <span class="step-number">4</span>
+            <span class="step-title">开启 WebSocket 长连接</span>
+            <p>进入“事件订阅”页面：</p>
+            <ol>
+                <li><strong>不要</strong>配置请求网址 (Request URL)。</li>
+                <li>找到配置页下方的“长连接模式 (WebSocket)”，点击开启。</li>
+                <li>在“添加事件”中搜索并添加 <code>im.message.receive_v1</code> (接收消息)。</li>
+            </ol>
+            <div class="img-placeholder">
+                <p>请在此处插入：事件订阅页面截图，箭头指向 WebSocket 开关和事件列表</p>
+                <img class="screenshot" src="assets/feishu-websocket.png" alt="开启 WebSocket">
+            </div>
+        </div>
+
+        <div class="step">
+            <span class="step-number">5</span>
+            <span class="step-title">获取凭证并配置设备</span>
+            <p>回到“凭证与基础信息”页面，复制 <strong>App ID</strong> 和 <strong>App Secret</strong>。</p>
+            <div class="img-placeholder">
+                <p>请在此处插入：凭证页面截图，遮挡部分 Secret</p>
+                <img class="screenshot" src="assets/feishu-credentials.png" alt="获取 App ID 和 Secret">
+            </div>
+            <p>连接开发板串口，输入以下命令完成配置：</p>
+            <pre>
+mimi> set_feishu_config cli_a1b2c3d4e5f6 secret_1234567890abcdef
+mimi> restart
+            </pre>
+            <p>重启后，MimiClaw 将自动连接飞书云端。</p>
+        </div>
+    </section>
+
+    <section id="cli-usage">
+        <h2>💻 常用 CLI 指令参考</h2>
+        <p>通过串口工具（如 Putty, SecureCRT, idf.py monitor）连接设备后使用。</p>
+        
+        <table>
+            <thead>
+                <tr>
+                    <th style="text-align: left; padding: 10px; border-bottom: 2px solid #ddd;">命令</th>
+                    <th style="text-align: left; padding: 10px; border-bottom: 2px solid #ddd;">说明</th>
+                    <th style="text-align: left; padding: 10px; border-bottom: 2px solid #ddd;">示例</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td style="padding: 10px; border-bottom: 1px solid #eee;"><code>wifi_set</code></td>
+                    <td style="padding: 10px; border-bottom: 1px solid #eee;">设置 WiFi 账号密码</td>
+                    <td style="padding: 10px; border-bottom: 1px solid #eee;"><code>wifi_set MyHome 12345678</code></td>
+                </tr>
+                <tr>
+                    <td style="padding: 10px; border-bottom: 1px solid #eee;"><code>set_tg_token</code></td>
+                    <td style="padding: 10px; border-bottom: 1px solid #eee;">设置 Telegram Token</td>
+                    <td style="padding: 10px; border-bottom: 1px solid #eee;"><code>set_tg_token 123456:ABC...</code></td>
+                </tr>
+                <tr>
+                    <td style="padding: 10px; border-bottom: 1px solid #eee;"><code>set_feishu_config</code></td>
+                    <td style="padding: 10px; border-bottom: 1px solid #eee;">设置飞书 AppID 和 Secret</td>
+                    <td style="padding: 10px; border-bottom: 1px solid #eee;"><code>set_feishu_config cli_xxx sec_xxx</code></td>
+                </tr>
+                <tr>
+                    <td style="padding: 10px; border-bottom: 1px solid #eee;"><code>set_api_key</code></td>
+                    <td style="padding: 10px; border-bottom: 1px solid #eee;">设置 LLM API Key</td>
+                    <td style="padding: 10px; border-bottom: 1px solid #eee;"><code>set_api_key sk-ant-xxx</code></td>
+                </tr>
+                <tr>
+                    <td style="padding: 10px; border-bottom: 1px solid #eee;"><code>restart</code></td>
+                    <td style="padding: 10px; border-bottom: 1px solid #eee;">重启设备</td>
+                    <td style="padding: 10px; border-bottom: 1px solid #eee;"><code>restart</code></td>
+                </tr>
+            </tbody>
+        </table>
+    </section>
+
+    <footer style="text-align: center; margin-top: 50px; padding: 20px; color: #777; border-top: 1px solid #eee;">
+        <p>MimiClaw Documentation &copy; 2026 | Generated by MimiClaw Team</p>
+    </footer>
+</div>
+
+</body>
+</html>
