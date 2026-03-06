@@ -25,6 +25,25 @@ static int64_t s_token_expire_ts = 0;
 static esp_websocket_client_handle_t s_ws_client = NULL;
 static bool s_is_running = false;
 
+// 消息ID去重机制
+#define MAX_PROCESSED_EVENT_IDS 50 // 增加存储容量
+static char s_processed_event_ids[MAX_PROCESSED_EVENT_IDS][64] = {0};
+static int s_event_id_index = 0;
+
+static bool is_event_processed(const char *event_id) {
+    for (int i = 0; i < MAX_PROCESSED_EVENT_IDS; i++) {
+        if (s_processed_event_ids[i][0] != '\0' && strcmp(s_processed_event_ids[i], event_id) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void add_processed_event(const char *event_id) {
+    strncpy(s_processed_event_ids[s_event_id_index], event_id, 63);
+    s_event_id_index = (s_event_id_index + 1) % MAX_PROCESSED_EVENT_IDS;
+}
+
 /* HTTP Response Accumulator */
 typedef struct {
     char *buf;
@@ -261,13 +280,94 @@ static void websocket_event_handler(void *handler_args, esp_event_base_t base, i
                         
                         cJSON *json = cJSON_Parse(json_str);
                         if (json) {
-                             // ... 这里的逻辑和之前一样 ...
-                             // 2. 检查 "header" -> "event_type"
+                             // 1. 检查消息ID，防止重复处理
                              cJSON *header = cJSON_GetObjectItem(json, "header");
+                             cJSON *event_id = cJSON_GetObjectItem(header, "event_id");
+                             if (event_id && event_id->valuestring) {
+                                 if (is_event_processed(event_id->valuestring)) {
+                                     ESP_LOGI(TAG, "Event %s already processed, skipping", event_id->valuestring);
+                                     cJSON_Delete(json);
+                                     free(json_str);
+                                     return;
+                                 }
+                                 add_processed_event(event_id->valuestring);
+                             }
+                              
+                             // 2. 检查消息时间戳，避免处理旧消息
+                             cJSON *event = cJSON_GetObjectItem(json, "event");
+                             int64_t msg_time = 0;
+                             bool has_time = false;
+                             
+                             // 检查是否是消息接收事件
+                             cJSON *message = cJSON_GetObjectItem(event, "message");
+                             if (message) {
+                                 cJSON *create_time = cJSON_GetObjectItem(message, "create_time");
+                                 if (create_time && create_time->valuestring) {
+                                     msg_time = atoll(create_time->valuestring);
+                                     has_time = true;
+                                 }
+                             }
+                             // 检查是否是消息已读事件
+                             else {
+                                 cJSON *reader = cJSON_GetObjectItem(event, "reader");
+                                 if (reader) {
+                                     cJSON *read_time = cJSON_GetObjectItem(reader, "read_time");
+                                     if (read_time && read_time->valuestring) {
+                                         msg_time = atoll(read_time->valuestring);
+                                         has_time = true;
+                                     }
+                                 }
+                             }
+                             
+                             // 如果有时间戳，检查是否是旧消息
+                             if (has_time) {
+                                 int64_t now = esp_timer_get_time() / 1000; // 当前时间（毫秒）
+                                 int64_t time_diff = now - msg_time;
+                                 
+                                 // 忽略10分钟前的消息
+                                 if (time_diff > 10 * 60 * 1000) {
+                                     ESP_LOGI(TAG, "Skipping old event from %lld ms ago", time_diff);
+                                     cJSON_Delete(json);
+                                     free(json_str);
+                                     return;
+                                 }
+                             }
+                             
+                             // 向飞书服务器发送事件确认
+                             if (event_id && event_id->valuestring) {
+                                 // 生成随机req_id
+                                 char req_id[64];
+                                 snprintf(req_id, sizeof(req_id), "req_%lld", esp_timer_get_time());
+                                 
+                                 // 构建确认消息
+                                 cJSON *ack_json = cJSON_CreateObject();
+                                 cJSON_AddStringToObject(ack_json, "schema", "2.0");
+                                 cJSON_AddStringToObject(ack_json, "req_id", req_id);
+                                 cJSON_AddStringToObject(ack_json, "action", "ack");
+                                 
+                                 cJSON *params = cJSON_CreateObject();
+                                 cJSON_AddStringToObject(params, "event_id", event_id->valuestring);
+                                 cJSON_AddItemToObject(ack_json, "params", params);
+                                 
+                                 char *ack_str = cJSON_PrintUnformatted(ack_json);
+                                 if (ack_str) {
+                                     // 发送确认消息
+                                     if (s_ws_client) {
+                                         // 使用正确的ESP-IDF WebSocket发送函数
+                                         // 对于文本数据（JSON），使用esp_websocket_client_send_text
+                                         esp_websocket_client_send_text(s_ws_client, ack_str, strlen(ack_str), portMAX_DELAY);
+                                         ESP_LOGI(TAG, "Sent ack for event: %s", event_id->valuestring);
+                                     }
+                                     free(ack_str);
+                                 }
+                                 cJSON_Delete(ack_json);
+                             }
+                             
+                             // 2. 检查 "header" -> "event_type"
                              cJSON *event_type = cJSON_GetObjectItem(header, "event_type");
                              if (event_type) {
                                  ESP_LOGI(TAG, "Event Type: %s", event_type->valuestring);
-                                 
+                                  
                                  if (strcmp(event_type->valuestring, "im.message.receive_v1") == 0) {
                                      cJSON *event = cJSON_GetObjectItem(json, "event");
                                      cJSON *message = cJSON_GetObjectItem(event, "message");
@@ -300,9 +400,9 @@ static void websocket_event_handler(void *handler_args, esp_event_base_t base, i
                                                  strncpy(msg.channel, MIMI_CHAN_FEISHU, sizeof(msg.channel)-1);
                                                  strncpy(msg.chat_id, target_id, sizeof(msg.chat_id)-1);
                                                  msg.content = strdup(text->valuestring);
-                                                 
+                                                  
                                                  ESP_LOGI(TAG, "Pushing to bus: [%s] %s", target_id, text->valuestring);
-                                                 
+                                                  
                                                  if (message_bus_push_inbound(&msg) != ESP_OK) {
                                                      ESP_LOGE(TAG, "Failed to push to bus");
                                                      free(msg.content);

@@ -6,25 +6,10 @@
 #include "esp_log.h"
 #include "esp_wifi.h"
 #include "esp_netif.h"
-#include "esp_sntp.h"
 #include "nvs_flash.h"
 #include "nvs.h"
-#include <time.h>
 
 static const char *TAG = "wifi";
-
-static void initialize_sntp(void)
-{
-    ESP_LOGI(TAG, "Initializing SNTP");
-    esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
-    esp_sntp_setservername(0, "cn.pool.ntp.org");
-    esp_sntp_setservername(1, "pool.ntp.org");
-    esp_sntp_init();
-    
-    // Set timezone
-    setenv("TZ", MIMI_TIMEZONE, 1);
-    tzset();
-}
 
 static EventGroupHandle_t s_wifi_event_group;
 static int s_retry_count = 0;
@@ -81,7 +66,6 @@ static void event_handler(void *arg, esp_event_base_t event_base,
         s_retry_count = 0;
         s_connected = true;
 
-        initialize_sntp();
         xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
     }
 }

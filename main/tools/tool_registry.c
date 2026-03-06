@@ -1,5 +1,7 @@
 #include "tool_registry.h"
+#include "mimi_config.h"
 #include "tools/tool_web_search.h"
+#include "tools/tool_kimi_search.h"
 #include "tools/tool_get_time.h"
 #include "tools/tool_files.h"
 #include "tools/tool_cron.h"
@@ -54,12 +56,12 @@ esp_err_t tool_registry_init(void)
 {
     s_tool_count = 0;
 
-    /* Register web_search */
+    /* Register web_search (Brave Search) */
     tool_web_search_init();
 
     mimi_tool_t ws = {
         .name = "web_search",
-        .description = "Search the web for current information. Use this when you need up-to-date facts, news, weather, or anything beyond your training data.",
+        .description = "Search the web for current information using Brave Search API. Use this when you need up-to-date facts, news, weather, or anything beyond your training data.",
         .input_schema_json =
             "{\"type\":\"object\","
             "\"properties\":{\"query\":{\"type\":\"string\",\"description\":\"The search query\"}},"
@@ -67,6 +69,20 @@ esp_err_t tool_registry_init(void)
         .execute = tool_web_search_execute,
     };
     register_tool(&ws);
+
+    /* Register kimi_search (Kimi AI Web Search) */
+    tool_kimi_search_init();
+
+    mimi_tool_t ks = {
+        .name = "kimi_search",
+        .description = "Search the web using Kimi AI's built-in web search capability. Use this for Chinese content, real-time information, or when Brave Search is not available. Requires Kimi API key.",
+        .input_schema_json =
+            "{\"type\":\"object\","
+            "\"properties\":{\"query\":{\"type\":\"string\",\"description\":\"The search query\"}},"
+            "\"required\":[\"query\"]}",
+        .execute = tool_kimi_search_execute,
+    };
+    register_tool(&ks);
 
     /* Register get_current_time */
     mimi_tool_t gt = {
@@ -83,10 +99,10 @@ esp_err_t tool_registry_init(void)
     /* Register read_file */
     mimi_tool_t rf = {
         .name = "read_file",
-        .description = "Read a file from SPIFFS storage. Path must start with /spiffs/.",
+        .description = "Read a file from SPIFFS storage. Path must start with " MIMI_SPIFFS_BASE "/.",
         .input_schema_json =
             "{\"type\":\"object\","
-            "\"properties\":{\"path\":{\"type\":\"string\",\"description\":\"Absolute path starting with /spiffs/\"}},"
+            "\"properties\":{\"path\":{\"type\":\"string\",\"description\":\"Absolute path starting with " MIMI_SPIFFS_BASE "/\"}},"
             "\"required\":[\"path\"]}",
         .execute = tool_read_file_execute,
     };
@@ -95,10 +111,10 @@ esp_err_t tool_registry_init(void)
     /* Register write_file */
     mimi_tool_t wf = {
         .name = "write_file",
-        .description = "Write or overwrite a file on SPIFFS storage. Path must start with /spiffs/.",
+        .description = "Write or overwrite a file on SPIFFS storage. Path must start with " MIMI_SPIFFS_BASE "/.",
         .input_schema_json =
             "{\"type\":\"object\","
-            "\"properties\":{\"path\":{\"type\":\"string\",\"description\":\"Absolute path starting with /spiffs/\"},"
+            "\"properties\":{\"path\":{\"type\":\"string\",\"description\":\"Absolute path starting with " MIMI_SPIFFS_BASE "/\"},"
             "\"content\":{\"type\":\"string\",\"description\":\"File content to write\"}},"
             "\"required\":[\"path\",\"content\"]}",
         .execute = tool_write_file_execute,
@@ -111,7 +127,7 @@ esp_err_t tool_registry_init(void)
         .description = "Find and replace text in a file on SPIFFS. Replaces first occurrence of old_string with new_string.",
         .input_schema_json =
             "{\"type\":\"object\","
-            "\"properties\":{\"path\":{\"type\":\"string\",\"description\":\"Absolute path starting with /spiffs/\"},"
+            "\"properties\":{\"path\":{\"type\":\"string\",\"description\":\"Absolute path starting with " MIMI_SPIFFS_BASE "/\"},"
             "\"old_string\":{\"type\":\"string\",\"description\":\"Text to find\"},"
             "\"new_string\":{\"type\":\"string\",\"description\":\"Replacement text\"}},"
             "\"required\":[\"path\",\"old_string\",\"new_string\"]}",
@@ -125,7 +141,7 @@ esp_err_t tool_registry_init(void)
         .description = "List files on SPIFFS storage, optionally filtered by path prefix.",
         .input_schema_json =
             "{\"type\":\"object\","
-            "\"properties\":{\"prefix\":{\"type\":\"string\",\"description\":\"Optional path prefix filter, e.g. /spiffs/memory/\"}},"
+            "\"properties\":{\"prefix\":{\"type\":\"string\",\"description\":\"Optional path prefix filter, e.g. " MIMI_SPIFFS_BASE "/memory/\"}},"
             "\"required\":[]}",
         .execute = tool_list_dir_execute,
     };
@@ -189,9 +205,15 @@ const char *tool_registry_get_tools_json(void)
 esp_err_t tool_registry_execute(const char *name, const char *input_json,
                                 char *output, size_t output_size)
 {
+    /* Handle Kimi builtin_function name mapping */
+    const char *tool_name = name;
+    if (strcmp(name, "$web_search") == 0) {
+        tool_name = "kimi_search";
+    }
+
     for (int i = 0; i < s_tool_count; i++) {
-        if (strcmp(s_tools[i].name, name) == 0) {
-            ESP_LOGI(TAG, "Executing tool: %s", name);
+        if (strcmp(s_tools[i].name, tool_name) == 0) {
+            ESP_LOGI(TAG, "Executing tool: %s (requested: %s)", tool_name, name);
             return s_tools[i].execute(input_json, output, output_size);
         }
     }

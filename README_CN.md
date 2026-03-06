@@ -124,13 +124,13 @@ cp main/mimi_secrets.h.example main/mimi_secrets.h
 编辑 `main/mimi_secrets.h`：
 
 ```c
-#define MIMI_SECRET_WIFI_SSID       "eai-link"
-#define MIMI_SECRET_WIFI_PASS       "kxy@0371"
+#define MIMI_SECRET_WIFI_SSID       "你的WiFi名"
+#define MIMI_SECRET_WIFI_PASS       "你的WiFi密码"
 #define MIMI_SECRET_TG_TOKEN        "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"
 #define MIMI_SECRET_API_KEY         "sk-ant-api03-xxxxx"
 #define MIMI_SECRET_MODEL_PROVIDER  "anthropic"     // "anthropic" 或 "openai"
 #define MIMI_SECRET_SEARCH_KEY      ""              // 可选：Brave Search API key
-#define MIMI_SECRET_PROXY_HOST      "192.168.1.83 "      // 可选：代理地址
+#define MIMI_SECRET_PROXY_HOST      "10.0.0.1"      // 可选：代理地址
 #define MIMI_SECRET_PROXY_PORT      "7897"           // 可选：代理端口
 ```
 
@@ -173,46 +173,16 @@ mimi> clear_proxy                    # 清除代理
 
 > **提示**：确保 ESP32-S3 和代理机器在同一局域网。Clash Verge 在「设置 → 允许局域网」中开启。
 
-### 国内大模型支持 (Moonshot / DeepSeek / Doubao)
-
-MimiClaw 完美支持兼容 OpenAI 接口的国内大模型。无需修改代码，只需通过串口命令配置 `api_url` 和 `model` 即可。
-
-**以 Kimi (Moonshot AI) 为例：**
-
-1. 注册 Moonshot 开放平台，获取 API Key。
-2. 连接串口，输入以下命令：
-
-```bash
-mimi> set_model_provider openai                   # 切换到 OpenAI 兼容模式
-mimi> set_api_url https://api.moonshot.cn/v1/chat/completions  # 设置 API 端点
-mimi> set_api_key sk-xxxxxxxxxxxxxxxxxxxxxxxx     # 设置你的 API Key
-mimi> set_model moonshot-v1-8k                    # 设置模型名称
-mimi> restart                                     # 重启生效
-```
-
-**以 DeepSeek 为例：**
-
-```bash
-mimi> set_model_provider openai
-mimi> set_api_url https://api.deepseek.com/chat/completions
-mimi> set_api_key sk-xxxxxxxxxxxxxxxxxxxxxxxx
-mimi> set_model deepseek-chat
-mimi> restart
-```
-
-> **注意**：`set_api_url` 必须包含完整的路径（通常以 `/v1/chat/completions` 结尾）。
-
-### CLI 命令
+### CLI 命令（通过 UART/COM 口连接）
 
 通过串口连接即可配置和调试。**配置命令**让你无需重新编译就能修改设置 — 随时随地插上 USB 线就能改。
 
 **运行时配置**（存入 NVS，覆盖编译时默认值）：
 
-```bash
+```
 mimi> wifi_set MySSID MyPassword   # 换 WiFi
 mimi> set_tg_token 123456:ABC...   # 换 Telegram Bot Token
 mimi> set_api_key sk-ant-api03-... # 换 API Key（Anthropic 或 OpenAI）
-mimi> set_api_url https://...        # 设置自定义 API 端点 (用于兼容 OpenAI 的服务)
 mimi> set_model_provider openai    # 切换提供商（anthropic|openai）
 mimi> set_model gpt-4o             # 换模型
 mimi> set_proxy 192.168.1.83 7897  # 设置代理
@@ -224,7 +194,7 @@ mimi> config_reset                 # 清除 NVS，恢复编译时默认值
 
 **调试与运维：**
 
-```bash
+```
 mimi> wifi_status              # 连上了吗？
 mimi> memory_read              # 看看它记住了什么
 mimi> memory_write "内容"       # 写入 MEMORY.md
@@ -236,70 +206,46 @@ mimi> cron_start                  # 立即启动 cron 调度器
 mimi> restart                     # 重启
 ```
 
-## 接入指南
+### USB (JTAG) 与 UART：哪个口做什么
 
-### Telegram 接入
+大多数 ESP32-S3 开发板有 **两个 USB-C 口**：
 
-MimiClaw 核心支持 Telegram Bot，配置非常简单。
+| 端口 | 用途 |
+|------|------|
+| **USB**（JTAG） | `idf.py flash`、JTAG 调试 |
+| **COM**（UART） | **REPL 命令行**、串口控制台 |
 
-1. **创建机器人**
-   - 在 Telegram 中搜索 [@BotFather](https://t.me/BotFather) 并开始对话。
-   - 发送 `/newbot` 命令。
-   - 按照提示设置机器人的名称（Name）和用户名（Username）。
-   - 成功后，BotFather 会给你一个 **HTTP API Token**，格式如 `123456789:ABCdefGhIJKlmNoPQRstuVWxyz`。
+> **REPL 必须连接 UART（COM）口。** USB（JTAG）口不支持交互式 REPL 输入。
 
-2. **配置 Token**
-   - **方法一（推荐）：通过串口动态配置**
-     连接开发板串口，输入以下命令：
-     ```bash
-     mimi> set_tg_token 123456789:ABCdefGhIJKlmNoPQRstuVWxyz
-     mimi> restart
-     ```
-   - **方法二：编译时配置**
-     修改 `main/mimi_secrets.h` 文件：
-     ```c
-     #define MIMI_SECRET_TG_TOKEN "123456789:ABCdefGhIJKlmNoPQRstuVWxyz"
-     ```
-     然后重新编译烧录：`idf.py fullclean && idf.py build flash monitor`
+<details>
+<summary>端口详情与推荐工作流</summary>
 
-3. **网络设置（国内用户）**
-   - 如果你的网络环境无法直接访问 Telegram API，请配置代理：
-     ```bash
-     mimi> set_proxy 192.168.1.x 7890  # 替换为你电脑/路由器的局域网 IP 和代理端口
-     mimi> restart
-     ```
+| 端口 | 标注 | 协议 |
+|------|------|------|
+| **USB** | USB / JTAG | 原生 USB Serial/JTAG |
+| **COM** | UART / COM | 外置 UART 桥接芯片（CP2102/CH340） |
 
-### 飞书 (Feishu) 接入
+ESP-IDF 控制台默认配置为 UART 输出（`CONFIG_ESP_CONSOLE_UART_DEFAULT=y`）。
 
-**⚠️ 当前状态：实验性支持**
+**同时连接两个口时：**
 
-MimiClaw 现在支持飞书机器人（企业自建应用），通过 WebSocket 接收消息，无需公网 IP。
+- USB（JTAG）口负责烧录/下载，并提供辅助串口输出
+- UART（COM）口提供主要的交互式控制台，用于 REPL
+- macOS 下两个口都会显示为 `/dev/cu.usbmodem*` 或 `/dev/cu.usbserial-*`，用 `ls /dev/cu.usb*` 区分
+- Linux 下 USB（JTAG）通常是 `/dev/ttyACM0`，UART 通常是 `/dev/ttyUSB0`
 
-1. **创建应用**
-   - 登录 [飞书开放平台](https://open.feishu.cn/app) 创建“企业自建应用”。
-   - 在“添加应用能力”中启用“机器人”。
+**推荐工作流：**
 
-2. **配置权限**
-   - 进入“权限管理”，搜索并开通以下权限：
-     - `im:message` (获取用户发给机器人的单聊消息)
-     - `im:message:group_at_msg` (获取群聊中 @机器人的消息)
-     - `im:message:send_as_bot` (以应用身份发送消息)
-   - 发布版本以生效权限。
+```bash
+# 通过 USB（JTAG）口烧录
+idf.py -p /dev/cu.usbmodem11401 flash
 
-3. **开启 WebSocket**
-   - 进入“事件订阅”，**不要**配置请求网址。
-   - 找到“长连接模式（WebSocket）”并点击开启。
-   - 订阅事件：`im.message.receive_v1` (接收消息)。
+# 通过 UART（COM）口打开 REPL
+idf.py -p /dev/cu.usbserial-110 monitor
+# 或使用任意串口工具：screen、minicom、PuTTY，波特率 115200
+```
 
-4. **配置 MimiClaw**
-   - 获取 App ID 和 App Secret（在“凭证与基础信息”页）。
-   - 连接串口，输入命令：
-     ```bash
-     mimi> set_feishu_config cli_a1b2c3d4e5f6 secret_1234567890abcdef
-     mimi> restart
-     ```
-
-现在，你可以给飞书机器人发送消息，MimiClaw 会通过 WebSocket 收到并回复。
+</details>
 
 ## 记忆
 
@@ -321,13 +267,28 @@ MimiClaw 同时支持 Anthropic 和 OpenAI 的工具调用 — LLM 在对话中�
 
 | 工具 | 说明 |
 |------|------|
-| `web_search` | 通过 Brave Search API 搜索网页，获取实时信息 |
+| `kimi_search` | 使用 Kimi AI 内置的网页搜索功能。适合中文内容和实时信息。无需额外 API 密钥（使用 Kimi API 密钥）。 |
+| `web_search` | 通过 Brave Search API 搜索网页，获取实时信息。需要 Brave Search API 密钥。 |
 | `get_current_time` | 通过 HTTP 获取当前日期和时间，并设置系统时钟 |
 | `cron_add` | 创建定时或一次性任务（LLM 自主创建 cron 任务） |
 | `cron_list` | 列出所有已调度的 cron 任务 |
 | `cron_remove` | 按 ID 删除 cron 任务 |
 
-启用网页搜索需要在 `mimi_secrets.h` 中设置 [Brave Search API key](https://brave.com/search/api/)（`MIMI_SECRET_SEARCH_KEY`）。
+### 网页搜索选项
+
+MimiClaw 提供两种网页搜索方式：
+
+1. **Kimi 搜索** (`kimi_search`) - **推荐国内用户使用**
+   - 使用 Kimi AI 内置的 `$web_search` 函数
+   - 适合中文内容和实时信息
+   - 无需额外 API 密钥（使用你的 Kimi API 密钥）
+   - 国内无需代理即可使用
+
+2. **Brave 搜索** (`web_search`)
+   - 使用 Brave Search API
+   - 适合英文内容
+   - 需要单独的 [Brave Search API 密钥](https://brave.com/search/api/)
+   - 在 `mimi_secrets.h` 中设置 `MIMI_SECRET_SEARCH_KEY`
 
 ## 定时任务（Cron）
 
@@ -362,6 +323,14 @@ MimiClaw 内置 cron 调度器，让 AI 可以自主安排任务。LLM 可以通
 ## 贡献
 
 提交 Issue 或 Pull Request 前，请先阅读 **[CONTRIBUTING.md](CONTRIBUTING.md)**。
+
+## 贡献者
+
+感谢所有为 MimiClaw 做出贡献的开发者。
+
+<a href="https://github.com/memovai/mimiclaw/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=memovai/mimiclaw" alt="MimiClaw contributors" />
+</a>
 
 ## 许可证
 

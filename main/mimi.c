@@ -12,8 +12,8 @@
 #include "mimi_config.h"
 #include "bus/message_bus.h"
 #include "wifi/wifi_manager.h"
-#include "telegram/telegram_bot.h"
-#include "feishu/feishu_bot.h"
+#include "channels/telegram/telegram_bot.h"
+#include "channels/feishu/feishu_bot.h"
 #include "llm/llm_proxy.h"
 #include "agent/agent_loop.h"
 #include "memory/memory_store.h"
@@ -24,8 +24,6 @@
 #include "tools/tool_registry.h"
 #include "cron/cron_service.h"
 #include "heartbeat/heartbeat.h"
-#include "buttons/button_driver.h"
-#include "imu/imu_manager.h"
 #include "skills/skill_loader.h"
 
 static const char *TAG = "mimi";
@@ -86,7 +84,7 @@ static void outbound_dispatch_task(void *arg)
             if (send_err != ESP_OK) {
                 ESP_LOGE(TAG, "Feishu send failed for %s: %s", msg.chat_id, esp_err_to_name(send_err));
             } else {
-                ESP_LOGI(TAG, "Feishu send success for %s", msg.chat_id);
+                ESP_LOGI(TAG, "Feishu send success for %s (%d bytes)", msg.chat_id, (int)strlen(msg.content));
             }
         } else if (strcmp(msg.channel, MIMI_CHAN_WEBSOCKET) == 0) {
             esp_err_t ws_err = ws_server_send(msg.chat_id, msg.content);
@@ -117,11 +115,6 @@ void app_main(void)
              (int)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
     ESP_LOGI(TAG, "PSRAM free:    %d bytes",
              (int)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
-
-    /* Input */
-    button_Init();
-    imu_manager_init();
-    imu_manager_set_shake_callback(NULL);
 
     /* Phase 1: Core infrastructure */
     ESP_ERROR_CHECK(init_nvs());
@@ -165,7 +158,7 @@ void app_main(void)
             /* Start network-dependent services */
             ESP_ERROR_CHECK(agent_loop_start());
             // ESP_ERROR_CHECK(telegram_bot_start());
-            feishu_bot_start();
+            ESP_ERROR_CHECK(feishu_bot_start());
             cron_service_start();
             heartbeat_start();
             ESP_ERROR_CHECK(ws_server_start());

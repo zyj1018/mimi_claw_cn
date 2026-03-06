@@ -6,46 +6,63 @@
 #include <stdlib.h>
 #include <dirent.h>
 #include <time.h>
+#include <sys/stat.h>
+#include <errno.h>
+#include <inttypes.h>
 #include "esp_log.h"
 #include "cJSON.h"
 
 static const char *TAG = "session";
 
+static uint32_t hash_chat_id(const char *chat_id)
+{
+    uint32_t hash = 5381;
+    while (*chat_id) {
+        hash = ((hash << 5) + hash) ^ (unsigned char)*chat_id;
+        chat_id++;
+    }
+    return hash;
+}
+
 static void session_path(const char *chat_id, char *buf, size_t size)
 {
-    /* SPIFFS has a 32-char total path length limit. 
-       We must shorten the long chat_id (e.g. ou_bcf55733447f758e73d6941590f44ee0) 
-       to something like "s_bcf55733_44ee0.j" */
-    size_t id_len = strlen(chat_id);
-    if (id_len > 16) {
-        // Extract parts of the ID to keep it somewhat unique but short
-        // Use prefix (after 'ou_') and suffix
-        const char *p = chat_id;
-        if (strncmp(chat_id, "ou_", 3) == 0) p = chat_id + 3;
-        
-        snprintf(buf, size, "%s/s_%.6s_%.6s.j", 
-                 MIMI_SPIFFS_SESSION_DIR, 
-                 p, 
-                 chat_id + id_len - 6);
-    } else {
-        snprintf(buf, size, "%s/s_%s.j", MIMI_SPIFFS_SESSION_DIR, chat_id);
-    }
+    /* Use hash of chat_id to create shorter filename (max 8 hex chars) */
+    uint32_t hash = hash_chat_id(chat_id);
+    snprintf(buf, size, "%s/s%08" PRIx32 ".jsonl", MIMI_SPIFFS_SESSION_DIR, hash);
 }
 
 esp_err_t session_mgr_init(void)
 {
-    ESP_LOGI(TAG, "Session manager initialized at %s", MIMI_SPIFFS_SESSION_DIR);
+    /* SPIFFS is a flat filesystem - no real directory creation needed.
+     * Paths with "/" are just part of the filename.
+     * Just verify SPIFFS is writable by checking we can open a test file.
+     */
+    char test_path[64];
+    snprintf(test_path, sizeof(test_path), "%s/.test", MIMI_SPIFFS_SESSION_DIR);
+    
+    FILE *f = fopen(test_path, "w");
+    if (!f) {
+        ESP_LOGW(TAG, "SPIFFS sessions not writable - sessions will not be saved");
+        ESP_LOGW(TAG, "Check if SPIFFS partition is large enough");
+    } else {
+        fclose(f);
+        remove(test_path);
+        ESP_LOGI(TAG, "Session manager ready at %s", MIMI_SPIFFS_SESSION_DIR);
+    }
+    
     return ESP_OK;
 }
 
 esp_err_t session_append(const char *chat_id, const char *role, const char *content)
 {
-    char path[64];
+    char path[128];  /* Increased from 64 to handle long chat IDs */
     session_path(chat_id, path, sizeof(path));
+
+    // ESP_LOGI(TAG, "Opening session file: %s (len=%d)", path, (int)strlen(path));
 
     FILE *f = fopen(path, "a");
     if (!f) {
-        ESP_LOGE(TAG, "Cannot open session file %s", path);
+        ESP_LOGE(TAG, "Cannot open session file %s (errno=%d: %s)", path, errno, strerror(errno));
         return ESP_FAIL;
     }
 
@@ -168,7 +185,7 @@ void session_list(void)
     struct dirent *entry;
     int count = 0;
     while ((entry = readdir(dir)) != NULL) {
-        if (strstr(entry->d_name, "s_") && strstr(entry->d_name, ".j")) {
+        if (strstr(entry->d_name, "tg_") && strstr(entry->d_name, ".jsonl")) {
             ESP_LOGI(TAG, "  Session: %s", entry->d_name);
             count++;
         }

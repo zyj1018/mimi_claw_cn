@@ -18,11 +18,6 @@ esp_err_t llm_proxy_init(void);
 esp_err_t llm_set_api_key(const char *api_key);
 
 /**
- * Save the LLM API URL to NVS.
- */
-esp_err_t llm_set_api_url(const char *api_url);
-
-/**
  * Save the LLM provider to NVS. (e.g. "anthropic", "openai")
  */
 esp_err_t llm_set_provider(const char *provider);

@@ -7,34 +7,20 @@
 #include "esp_log.h"
 #include "esp_http_client.h"
 #include "esp_crt_bundle.h"
-#include "esp_tls.h"
 #include "esp_heap_caps.h"
 #include "nvs.h"
 #include "cJSON.h"
-#include <time.h>
-#include <netdb.h>
-#include <sys/socket.h>
-
-#include "mbedtls/platform.h"
-#include "mbedtls/net_sockets.h"
-#include "mbedtls/esp_debug.h"
-#include "mbedtls/ssl.h"
-#include "mbedtls/entropy.h"
-#include "mbedtls/ctr_drbg.h"
-#include "mbedtls/error.h"
 
 static const char *TAG = "llm";
 
 #define LLM_API_KEY_MAX_LEN 320
 #define LLM_MODEL_MAX_LEN   64
-#define LLM_API_URL_MAX_LEN 128
 #define LLM_DUMP_MAX_BYTES   (16 * 1024)
 #define LLM_DUMP_CHUNK_BYTES 320
 
 static char s_api_key[LLM_API_KEY_MAX_LEN] = {0};
 static char s_model[LLM_MODEL_MAX_LEN] = MIMI_LLM_DEFAULT_MODEL;
 static char s_provider[16] = MIMI_LLM_PROVIDER_DEFAULT;
-static char s_api_url[LLM_API_URL_MAX_LEN] = {0};
 
 static void llm_log_payload(const char *label, const char *payload)
 {
@@ -135,55 +121,101 @@ static void resp_buf_free(resp_buf_t *rb)
     rb->cap = 0;
 }
 
-/* ── Shared HTTP dispatch ─────────────────────────────────────── */
+/* ── Chunked transfer encoding decoder ───────────────────────── */
+
+static void resp_buf_decode_chunked(resp_buf_t *rb)
+{
+    if (!rb->data || rb->len == 0) return;
+
+    /* Quick check: if body starts with '{' or '[', it's not chunked */
+    size_t i = 0;
+    while (i < rb->len && (rb->data[i] == ' ' || rb->data[i] == '\t')) i++;
+    if (i < rb->len && (rb->data[i] == '{' || rb->data[i] == '[')) return;
+
+    /* Try to decode chunked encoding in-place */
+    char *src = rb->data;
+    char *dst = rb->data;
+    char *end = rb->data + rb->len;
+
+    while (src < end) {
+        /* Parse hex chunk size */
+        char *line_end = strstr(src, "\r\n");
+        if (!line_end) break;
+
+        unsigned long chunk_size = strtoul(src, NULL, 16);
+        if (chunk_size == 0) break;  /* terminal chunk */
+
+        src = line_end + 2;  /* skip past \r\n after size */
+
+        if (src + chunk_size > end) {
+            /* Incomplete chunk, copy what we have */
+            size_t avail = end - src;
+            memmove(dst, src, avail);
+            dst += avail;
+            break;
+        }
+
+        memmove(dst, src, chunk_size);
+        dst += chunk_size;
+        src += chunk_size;
+
+        /* Skip trailing \r\n after chunk data */
+        if (src + 2 <= end && src[0] == '\r' && src[1] == '\n') {
+            src += 2;
+        }
+    }
+
+    rb->len = dst - rb->data;
+    rb->data[rb->len] = '\0';
+}
+
+/* ── HTTP event handler (for esp_http_client direct path) ─────── */
+
+static esp_err_t http_event_handler(esp_http_client_event_t *evt)
+{
+    resp_buf_t *rb = (resp_buf_t *)evt->user_data;
+    if (evt->event_id == HTTP_EVENT_ON_DATA) {
+        resp_buf_append(rb, (const char *)evt->data, evt->data_len);
+    }
+    return ESP_OK;
+}
+
+/* ── Provider helpers ──────────────────────────────────────────── */
+
+static bool provider_is_openai(void)
+{
+    return strcmp(s_provider, "openai") == 0;
+}
+
+static bool provider_is_kimi(void)
+{
+    return strcmp(s_provider, "kimi") == 0;
+}
 
 static bool provider_is_openai_compatible(void)
 {
-    /* If explicitly anthropic, then no. Otherwise default to OpenAI compatible. */
-    if (strcmp(s_provider, "anthropic") == 0) {
-        return false;
-    }
-    return true;
+    return provider_is_openai() || provider_is_kimi();
 }
 
 static const char *llm_api_url(void)
 {
-    if (s_api_url[0] != '\0') {
-        return s_api_url;
+    if (provider_is_kimi()) {
+        return MIMI_KIMI_API_URL;
     }
-    return provider_is_openai_compatible() ? MIMI_OPENAI_API_URL : MIMI_LLM_API_URL;
+    return provider_is_openai() ? MIMI_OPENAI_API_URL : MIMI_LLM_API_URL;
 }
 
-/* Simple URL parser for proxy path */
-static void get_host_path_from_url(const char *url, char *host, size_t host_len, char *path, size_t path_len)
+static const char *llm_api_host(void)
 {
-    /* Default fallback */
-    safe_copy(host, host_len, provider_is_openai_compatible() ? "api.openai.com" : "api.anthropic.com");
-    safe_copy(path, path_len, provider_is_openai_compatible() ? "/v1/chat/completions" : "/v1/messages");
-
-    if (!url || url[0] == '\0') return;
-
-    /* Skip scheme */
-    const char *p = strstr(url, "://");
-    if (p) {
-        p += 3;
-    } else {
-        p = url;
+    if (provider_is_kimi()) {
+        return "api.moonshot.cn";
     }
+    return provider_is_openai() ? "api.openai.com" : "api.anthropic.com";
+}
 
-    /* Find path start */
-    const char *slash = strchr(p, '/');
-    if (slash) {
-        size_t hlen = slash - p;
-        if (hlen >= host_len) hlen = host_len - 1;
-        memcpy(host, p, hlen);
-        host[hlen] = '\0';
-
-        safe_copy(path, path_len, slash);
-    } else {
-        safe_copy(host, host_len, p);
-        safe_copy(path, path_len, "/");
-    }
+static const char *llm_api_path(void)
+{
+    return provider_is_openai_compatible() ? "/v1/chat/completions" : "/v1/messages";
 }
 
 /* ── Init ─────────────────────────────────────────────────────── */
@@ -200,7 +232,6 @@ esp_err_t llm_proxy_init(void)
     if (MIMI_SECRET_MODEL_PROVIDER[0] != '\0') {
         safe_copy(s_provider, sizeof(s_provider), MIMI_SECRET_MODEL_PROVIDER);
     }
-    /* No build-time secret for URL yet, but could be added. Defaults to empty. */
 
     /* NVS overrides take highest priority (set via CLI) */
     nvs_handle_t nvs;
@@ -220,207 +251,59 @@ esp_err_t llm_proxy_init(void)
         if (nvs_get_str(nvs, MIMI_NVS_KEY_PROVIDER, provider_tmp, &len) == ESP_OK && provider_tmp[0]) {
             safe_copy(s_provider, sizeof(s_provider), provider_tmp);
         }
-        char url_tmp[LLM_API_URL_MAX_LEN] = {0};
-        len = sizeof(url_tmp);
-        if (nvs_get_str(nvs, MIMI_NVS_KEY_API_URL, url_tmp, &len) == ESP_OK && url_tmp[0]) {
-            safe_copy(s_api_url, sizeof(s_api_url), url_tmp);
-        }
         nvs_close(nvs);
     }
 
     if (s_api_key[0]) {
         ESP_LOGI(TAG, "LLM proxy initialized (provider: %s, model: %s)", s_provider, s_model);
-        if (s_api_url[0]) {
-            ESP_LOGI(TAG, "Custom API URL: %s", s_api_url);
-        }
     } else {
         ESP_LOGW(TAG, "No API key. Use CLI: set_api_key <KEY>");
     }
     return ESP_OK;
 }
 
-/* ── Raw MbedTLS (Insecure) ─────────────────────────────────── */
-
-static esp_err_t llm_http_raw_mbedtls(const char *post_data, resp_buf_t *rb, int *out_status)
-{
-    char host[128];
-    char path[128];
-    get_host_path_from_url(llm_api_url(), host, sizeof(host), path, sizeof(path));
-    
-    char port_str[6] = "443";
-    
-    ESP_LOGI(TAG, "Connecting to %s:443 (Raw MbedTLS, Insecure)", host);
-
-    mbedtls_net_context server_fd;
-    mbedtls_entropy_context entropy;
-    mbedtls_ctr_drbg_context ctr_drbg;
-    mbedtls_ssl_context ssl;
-    mbedtls_ssl_config conf;
-    int ret;
-    esp_err_t esp_ret = ESP_FAIL;
-
-    mbedtls_net_init(&server_fd);
-    mbedtls_ssl_init(&ssl);
-    mbedtls_ssl_config_init(&conf);
-    mbedtls_ctr_drbg_init(&ctr_drbg);
-    mbedtls_entropy_init(&entropy);
-
-    if ((ret = mbedtls_ctr_drbg_seed(&ctr_drbg, mbedtls_entropy_func, &entropy, NULL, 0)) != 0) {
-        ESP_LOGE(TAG, "mbedtls_ctr_drbg_seed failed: -0x%x", -ret);
-        goto exit;
-    }
-
-    if ((ret = mbedtls_net_connect(&server_fd, host, port_str, MBEDTLS_NET_PROTO_TCP)) != 0) {
-        ESP_LOGE(TAG, "mbedtls_net_connect failed: -0x%x", -ret);
-        goto exit;
-    }
-
-    if ((ret = mbedtls_ssl_config_defaults(&conf,
-                    MBEDTLS_SSL_IS_CLIENT,
-                    MBEDTLS_SSL_TRANSPORT_STREAM,
-                    MBEDTLS_SSL_PRESET_DEFAULT)) != 0) {
-        ESP_LOGE(TAG, "mbedtls_ssl_config_defaults failed: -0x%x", -ret);
-        goto exit;
-    }
-
-    /* CRITICAL: Disable verification */
-    mbedtls_ssl_conf_authmode(&conf, MBEDTLS_SSL_VERIFY_NONE);
-    mbedtls_ssl_conf_rng(&conf, mbedtls_ctr_drbg_random, &ctr_drbg);
-
-    if ((ret = mbedtls_ssl_setup(&ssl, &conf)) != 0) {
-        ESP_LOGE(TAG, "mbedtls_ssl_setup failed: -0x%x", -ret);
-        goto exit;
-    }
-
-    if ((ret = mbedtls_ssl_set_hostname(&ssl, host)) != 0) {
-        ESP_LOGE(TAG, "mbedtls_ssl_set_hostname failed: -0x%x", -ret);
-        goto exit;
-    }
-
-    /* MbedTLS 3.x requires 5 arguments (timeout callback). Pass NULL. */
-    mbedtls_ssl_set_bio(&ssl, &server_fd, mbedtls_net_send, mbedtls_net_recv, NULL);
-
-    while ((ret = mbedtls_ssl_handshake(&ssl)) != 0) {
-        if (ret != MBEDTLS_ERR_SSL_WANT_READ && ret != MBEDTLS_ERR_SSL_WANT_WRITE) {
-            ESP_LOGE(TAG, "mbedtls_ssl_handshake failed: -0x%x", -ret);
-            goto exit;
-        }
-    }
-
-    ESP_LOGI(TAG, "SSL handshake success");
-
-    /* Send HTTP Request */
-    char header[1024];
-    int body_len = strlen(post_data);
-    int hlen;
-    
-    if (provider_is_openai_compatible()) {
-        hlen = snprintf(header, sizeof(header),
-            "POST %s HTTP/1.1\r\n"
-            "Host: %s\r\n"
-            "Content-Type: application/json\r\n"
-            "Authorization: Bearer %s\r\n"
-            "Content-Length: %d\r\n"
-            "Connection: close\r\n\r\n",
-            path, host, s_api_key, body_len);
-    } else {
-        hlen = snprintf(header, sizeof(header),
-            "POST %s HTTP/1.1\r\n"
-            "Host: %s\r\n"
-            "Content-Type: application/json\r\n"
-            "x-api-key: %s\r\n"
-            "anthropic-version: %s\r\n"
-            "Content-Length: %d\r\n"
-            "Connection: close\r\n\r\n",
-            path, host, s_api_key, MIMI_LLM_API_VERSION, body_len);
-    }
-
-    /* Write Header */
-    int written = 0;
-    while (written < hlen) {
-        ret = mbedtls_ssl_write(&ssl, (const unsigned char *)header + written, hlen - written);
-        if (ret > 0) written += ret;
-        else if (ret != MBEDTLS_ERR_SSL_WANT_READ && ret != MBEDTLS_ERR_SSL_WANT_WRITE) {
-            ESP_LOGE(TAG, "mbedtls_ssl_write header failed: -0x%x", -ret);
-            goto exit;
-        }
-    }
-
-    /* Write Body */
-    written = 0;
-    while (written < body_len) {
-        ret = mbedtls_ssl_write(&ssl, (const unsigned char *)post_data + written, body_len - written);
-        if (ret > 0) written += ret;
-        else if (ret != MBEDTLS_ERR_SSL_WANT_READ && ret != MBEDTLS_ERR_SSL_WANT_WRITE) {
-            ESP_LOGE(TAG, "mbedtls_ssl_write body failed: -0x%x", -ret);
-            goto exit;
-        }
-    }
-
-    /* Read Response */
-    unsigned char tmp[1024];
-    while (1) {
-        ret = mbedtls_ssl_read(&ssl, tmp, sizeof(tmp));
-        if (ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE) continue;
-        if (ret == MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY || ret == 0) break;
-        if (ret < 0) {
-            ESP_LOGE(TAG, "mbedtls_ssl_read failed: -0x%x", -ret);
-            goto exit;
-        }
-        if (resp_buf_append(rb, (char *)tmp, ret) != ESP_OK) {
-            esp_ret = ESP_ERR_NO_MEM;
-            goto exit;
-        }
-    }
-
-    esp_ret = ESP_OK;
-
-    /* Parse status line */
-    *out_status = 0;
-    if (rb->len > 5 && strncmp(rb->data, "HTTP/", 5) == 0) {
-        const char *sp = strchr(rb->data, ' ');
-        if (sp) *out_status = atoi(sp + 1);
-    }
-
-    /* Strip HTTP headers */
-    char *body = strstr(rb->data, "\r\n\r\n");
-    if (body) {
-        body += 4;
-        size_t blen = rb->len - (body - rb->data);
-        memmove(rb->data, body, blen);
-        rb->len = blen;
-        rb->data[rb->len] = '\0';
-    }
-
-exit:
-    mbedtls_net_free(&server_fd);
-    mbedtls_ssl_free(&ssl);
-    mbedtls_ssl_config_free(&conf);
-    mbedtls_ctr_drbg_free(&ctr_drbg);
-    mbedtls_entropy_free(&entropy);
-    return esp_ret;
-}
-
 /* ── Direct path: esp_http_client ───────────────────────────── */
 
 static esp_err_t llm_http_direct(const char *post_data, resp_buf_t *rb, int *out_status)
 {
-    // Redirect to Raw MbedTLS implementation to bypass verification issues
-    return llm_http_raw_mbedtls(post_data, rb, out_status);
+    esp_http_client_config_t config = {
+        .url = llm_api_url(),
+        .event_handler = http_event_handler,
+        .user_data = rb,
+        .timeout_ms = 120 * 1000,
+        .buffer_size = 4096,
+        .buffer_size_tx = 4096,
+        .crt_bundle_attach = esp_crt_bundle_attach,
+    };
+
+    esp_http_client_handle_t client = esp_http_client_init(&config);
+    if (!client) return ESP_FAIL;
+
+    esp_http_client_set_method(client, HTTP_METHOD_POST);
+    esp_http_client_set_header(client, "Content-Type", "application/json");
+    if (provider_is_openai_compatible()) {
+        if (s_api_key[0]) {
+            char auth[LLM_API_KEY_MAX_LEN + 16];
+            snprintf(auth, sizeof(auth), "Bearer %s", s_api_key);
+            esp_http_client_set_header(client, "Authorization", auth);
+        }
+    } else {
+        esp_http_client_set_header(client, "x-api-key", s_api_key);
+        esp_http_client_set_header(client, "anthropic-version", MIMI_LLM_API_VERSION);
+    }
+    esp_http_client_set_post_field(client, post_data, strlen(post_data));
+
+    esp_err_t err = esp_http_client_perform(client);
+    *out_status = esp_http_client_get_status_code(client);
+    esp_http_client_cleanup(client);
+    return err;
 }
 
 /* ── Proxy path: manual HTTP over CONNECT tunnel ────────────── */
 
 static esp_err_t llm_http_via_proxy(const char *post_data, resp_buf_t *rb, int *out_status)
 {
-    char host[128];
-    char path[128];
-    get_host_path_from_url(llm_api_url(), host, sizeof(host), path, sizeof(path));
-
-    /* Note: proxy_conn_open needs a port. We assume 443 for HTTPS. 
-       If custom URL uses custom port, this simple parser won't catch it. 
-       Users should use direct mode or standard ports. */
-    proxy_conn_t *conn = proxy_conn_open(host, 443, 30000);
+    proxy_conn_t *conn = proxy_conn_open(llm_api_host(), 443, 30000);
     if (!conn) return ESP_ERR_HTTP_CONNECT;
 
     int body_len = strlen(post_data);
@@ -434,7 +317,7 @@ static esp_err_t llm_http_via_proxy(const char *post_data, resp_buf_t *rb, int *
             "Authorization: Bearer %s\r\n"
             "Content-Length: %d\r\n"
             "Connection: close\r\n\r\n",
-            path, host, s_api_key, body_len);
+            llm_api_path(), llm_api_host(), s_api_key, body_len);
     } else {
         hlen = snprintf(header, sizeof(header),
             "POST %s HTTP/1.1\r\n"
@@ -444,7 +327,7 @@ static esp_err_t llm_http_via_proxy(const char *post_data, resp_buf_t *rb, int *
             "anthropic-version: %s\r\n"
             "Content-Length: %d\r\n"
             "Connection: close\r\n\r\n",
-            path, host, s_api_key, MIMI_LLM_API_VERSION, body_len);
+            llm_api_path(), llm_api_host(), s_api_key, MIMI_LLM_API_VERSION, body_len);
     }
 
     if (proxy_conn_write(conn, header, hlen) < 0 ||
@@ -479,10 +362,11 @@ static esp_err_t llm_http_via_proxy(const char *post_data, resp_buf_t *rb, int *
         rb->data[rb->len] = '\0';
     }
 
+    /* Decode chunked transfer encoding if present */
+    resp_buf_decode_chunked(rb);
+
     return ESP_OK;
 }
-
-
 
 /* ── Shared HTTP dispatch ─────────────────────────────────────── */
 
@@ -511,18 +395,31 @@ static cJSON *convert_tools_openai(const char *tools_json)
         cJSON *schema = cJSON_GetObjectItem(tool, "input_schema");
         if (!name || !cJSON_IsString(name)) continue;
 
-        cJSON *func = cJSON_CreateObject();
-        cJSON_AddStringToObject(func, "name", name->valuestring);
-        if (desc && cJSON_IsString(desc)) {
-            cJSON_AddStringToObject(func, "description", desc->valuestring);
-        }
-        if (schema) {
-            cJSON_AddItemToObject(func, "parameters", cJSON_Duplicate(schema, 1));
-        }
-
         cJSON *wrap = cJSON_CreateObject();
-        cJSON_AddStringToObject(wrap, "type", "function");
-        cJSON_AddItemToObject(wrap, "function", func);
+
+        /* Special handling for kimi_search: use builtin_function.$web_search */
+        if (strcmp(name->valuestring, "kimi_search") == 0) {
+            cJSON_AddStringToObject(wrap, "type", "builtin_function");
+            /* function must be an object even for builtin_function */
+            cJSON *func = cJSON_CreateObject();
+            cJSON_AddStringToObject(func, "name", "$web_search");
+            if (desc && cJSON_IsString(desc)) {
+                cJSON_AddStringToObject(func, "description", desc->valuestring);
+            }
+            cJSON_AddItemToObject(wrap, "function", func);
+        } else {
+            /* Standard function format for other tools */
+            cJSON *func = cJSON_CreateObject();
+            cJSON_AddStringToObject(func, "name", name->valuestring);
+            if (desc && cJSON_IsString(desc)) {
+                cJSON_AddStringToObject(func, "description", desc->valuestring);
+            }
+            if (schema) {
+                cJSON_AddItemToObject(func, "parameters", cJSON_Duplicate(schema, 1));
+            }
+            cJSON_AddStringToObject(wrap, "type", "function");
+            cJSON_AddItemToObject(wrap, "function", func);
+        }
         cJSON_AddItemToArray(out, wrap);
     }
     cJSON_Delete(arr);
@@ -692,10 +589,7 @@ esp_err_t llm_chat_tools(const char *system_prompt,
     cJSON *body = cJSON_CreateObject();
     cJSON_AddStringToObject(body, "model", s_model);
     if (provider_is_openai_compatible()) {
-        /* Some OpenAI compatible APIs might prefer max_tokens, but max_completion_tokens is newer standard for O1/etc. 
-           We can stick to max_tokens for broader compatibility if needed, but OpenAI recommends max_completion_tokens now.
-           However, most clones (Moonshot/Doubao) use max_tokens. Let's switch to max_tokens for compatibility! */
-        cJSON_AddNumberToObject(body, "max_tokens", MIMI_LLM_MAX_TOKENS);
+        cJSON_AddNumberToObject(body, "max_completion_tokens", MIMI_LLM_MAX_TOKENS);
     } else {
         cJSON_AddNumberToObject(body, "max_tokens", MIMI_LLM_MAX_TOKENS);
     }
@@ -942,18 +836,5 @@ esp_err_t llm_set_provider(const char *provider)
 
     safe_copy(s_provider, sizeof(s_provider), provider);
     ESP_LOGI(TAG, "Provider set to: %s", s_provider);
-    return ESP_OK;
-}
-
-esp_err_t llm_set_api_url(const char *api_url)
-{
-    nvs_handle_t nvs;
-    ESP_ERROR_CHECK(nvs_open(MIMI_NVS_LLM, NVS_READWRITE, &nvs));
-    ESP_ERROR_CHECK(nvs_set_str(nvs, MIMI_NVS_KEY_API_URL, api_url));
-    ESP_ERROR_CHECK(nvs_commit(nvs));
-    nvs_close(nvs);
-
-    safe_copy(s_api_url, sizeof(s_api_url), api_url);
-    ESP_LOGI(TAG, "API URL set to: %s", s_api_url);
     return ESP_OK;
 }

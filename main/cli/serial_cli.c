@@ -1,8 +1,8 @@
 #include "serial_cli.h"
 #include "mimi_config.h"
 #include "wifi/wifi_manager.h"
-#include "telegram/telegram_bot.h"
-#include "feishu/feishu_bot.h"
+#include "channels/telegram/telegram_bot.h"
+#include "channels/feishu/feishu_bot.h"
 #include "llm/llm_proxy.h"
 #include "memory/memory_store.h"
 #include "memory/session_mgr.h"
@@ -73,6 +73,47 @@ static int cmd_set_tg_token(int argc, char **argv)
     return 0;
 }
 
+/* --- set_feishu_creds command --- */
+static struct {
+    struct arg_str *app_id;
+    struct arg_str *app_secret;
+    struct arg_end *end;
+} feishu_creds_args;
+
+/* --- feishu_send command --- */
+static struct {
+    struct arg_str *receive_id;
+    struct arg_str *text;
+    struct arg_end *end;
+} feishu_send_args;
+
+static int cmd_set_feishu_creds(int argc, char **argv)
+{
+    int nerrors = arg_parse(argc, argv, (void **)&feishu_creds_args);
+    if (nerrors != 0) {
+        arg_print_errors(stderr, feishu_creds_args.end, argv[0]);
+        return 1;
+    }
+    feishu_set_credentials(feishu_creds_args.app_id->sval[0],
+                          feishu_creds_args.app_secret->sval[0]);
+    printf("Feishu credentials saved.\n");
+    return 0;
+}
+
+static int cmd_feishu_send(int argc, char **argv)
+{
+    int nerrors = arg_parse(argc, argv, (void **)&feishu_send_args);
+    if (nerrors != 0) {
+        arg_print_errors(stderr, feishu_send_args.end, argv[0]);
+        return 1;
+    }
+
+    esp_err_t err = feishu_send_message(feishu_send_args.receive_id->sval[0],
+                                        feishu_send_args.text->sval[0]);
+    printf("feishu_send status: %s\n", esp_err_to_name(err));
+    return (err == ESP_OK) ? 0 : 1;
+}
+
 /* --- set_api_key command --- */
 static struct {
     struct arg_str *key;
@@ -88,24 +129,6 @@ static int cmd_set_api_key(int argc, char **argv)
     }
     llm_set_api_key(api_key_args.key->sval[0]);
     printf("API key saved.\n");
-    return 0;
-}
-
-/* --- set_api_url command --- */
-static struct {
-    struct arg_str *url;
-    struct arg_end *end;
-} api_url_args;
-
-static int cmd_set_api_url(int argc, char **argv)
-{
-    int nerrors = arg_parse(argc, argv, (void **)&api_url_args);
-    if (nerrors != 0) {
-        arg_print_errors(stderr, api_url_args.end, argv[0]);
-        return 1;
-    }
-    llm_set_api_url(api_url_args.url->sval[0]);
-    printf("API URL saved.\n");
     return 0;
 }
 
@@ -299,7 +322,7 @@ static int cmd_skill_list(int argc, char **argv)
 
     size_t n = skill_loader_build_summary(buf, 4096);
     if (n == 0) {
-        printf("No skills found under /spiffs/skills/.\n");
+        printf("No skills found under " MIMI_SKILLS_PREFIX ".\n");
     } else {
         printf("=== Skills ===\n%s", buf);
     }
@@ -326,9 +349,9 @@ static bool build_skill_path(const char *name, char *out, size_t out_size)
     if (strchr(name, '/') != NULL || strchr(name, '\\') != NULL) return false;
 
     if (has_md_suffix(name)) {
-        snprintf(out, out_size, "/spiffs/skills/%s", name);
+        snprintf(out, out_size, MIMI_SKILLS_PREFIX "%s", name);
     } else {
-        snprintf(out, out_size, "/spiffs/skills/%s.md", name);
+        snprintf(out, out_size, MIMI_SKILLS_PREFIX "%s.md", name);
     }
     return true;
 }
@@ -394,9 +417,9 @@ static int cmd_skill_search(int argc, char **argv)
     }
 
     const char *keyword = skill_search_args.keyword->sval[0];
-    DIR *dir = opendir("/spiffs");
+    DIR *dir = opendir(MIMI_SPIFFS_BASE);
     if (!dir) {
-        printf("Cannot open /spiffs.\n");
+        printf("Cannot open " MIMI_SPIFFS_BASE ".\n");
         return 1;
     }
 
@@ -414,7 +437,7 @@ static int cmd_skill_search(int argc, char **argv)
         if (strcmp(name + name_len - 3, ".md") != 0) continue;
 
         char full_path[296];
-        snprintf(full_path, sizeof(full_path), "/spiffs/%s", name);
+        snprintf(full_path, sizeof(full_path), MIMI_SPIFFS_BASE "/%s", name);
 
         bool file_matched = contains_nocase(name, keyword);
         int matched_line = 0;
@@ -449,26 +472,6 @@ static int cmd_skill_search(int argc, char **argv)
     } else {
         printf("Total matches: %d\n", matches);
     }
-    return 0;
-}
-
-/* --- set_feishu_config command --- */
-static struct {
-    struct arg_str *app_id;
-    struct arg_str *app_secret;
-    struct arg_end *end;
-} feishu_config_args;
-
-static int cmd_set_feishu_config(int argc, char **argv)
-{
-    int nerrors = arg_parse(argc, argv, (void **)&feishu_config_args);
-    if (nerrors != 0) {
-        arg_print_errors(stderr, feishu_config_args.end, argv[0]);
-        return 1;
-    }
-    feishu_set_config(feishu_config_args.app_id->sval[0],
-                      feishu_config_args.app_secret->sval[0]);
-    printf("Feishu config saved.\n");
     return 0;
 }
 
@@ -513,12 +516,9 @@ static int cmd_config_show(int argc, char **argv)
     print_config("API Key",    MIMI_NVS_LLM,    MIMI_NVS_KEY_API_KEY,  MIMI_SECRET_API_KEY,    true);
     print_config("Model",      MIMI_NVS_LLM,    MIMI_NVS_KEY_MODEL,    MIMI_SECRET_MODEL,      false);
     print_config("Provider",   MIMI_NVS_LLM,    MIMI_NVS_KEY_PROVIDER, MIMI_SECRET_MODEL_PROVIDER, false);
-    print_config("API URL",    MIMI_NVS_LLM,    MIMI_NVS_KEY_API_URL,  "",                     false);
     print_config("Proxy Host", MIMI_NVS_PROXY,  MIMI_NVS_KEY_PROXY_HOST, MIMI_SECRET_PROXY_HOST, false);
     print_config("Proxy Port", MIMI_NVS_PROXY,  MIMI_NVS_KEY_PROXY_PORT, MIMI_SECRET_PROXY_PORT, false);
     print_config("Search Key", MIMI_NVS_SEARCH, MIMI_NVS_KEY_API_KEY,  MIMI_SECRET_SEARCH_KEY, true);
-    print_config("Feishu AppID", MIMI_NVS_FEISHU, MIMI_NVS_KEY_FEISHU_APP_ID, MIMI_SECRET_FEISHU_APP_ID, true);
-    print_config("Feishu Secret", MIMI_NVS_FEISHU, MIMI_NVS_KEY_FEISHU_SECRET, MIMI_SECRET_FEISHU_APP_SECRET, true);
     printf("=============================\n");
     return 0;
 }
@@ -527,9 +527,9 @@ static int cmd_config_show(int argc, char **argv)
 static int cmd_config_reset(int argc, char **argv)
 {
     const char *namespaces[] = {
-        MIMI_NVS_WIFI, MIMI_NVS_TG, MIMI_NVS_LLM, MIMI_NVS_PROXY, MIMI_NVS_SEARCH, MIMI_NVS_FEISHU
+        MIMI_NVS_WIFI, MIMI_NVS_TG, MIMI_NVS_LLM, MIMI_NVS_PROXY, MIMI_NVS_SEARCH
     };
-    for (int i = 0; i < 6; i++) {
+    for (int i = 0; i < 5; i++) {
         nvs_handle_t nvs;
         if (nvs_open(namespaces[i], NVS_READWRITE, &nvs) == ESP_OK) {
             nvs_erase_all(nvs);
@@ -602,8 +602,7 @@ esp_err_t serial_cli_init(void)
     esp_console_repl_t *repl = NULL;
     esp_console_repl_config_t repl_config = ESP_CONSOLE_REPL_CONFIG_DEFAULT();
     repl_config.prompt = "mimi> ";
-    repl_config.max_cmdline_length = 1024;
-    repl_config.task_stack_size = MIMI_CLI_STACK; // 使用我们在 config.h 中定义的增大后的栈大小
+    repl_config.max_cmdline_length = 256;
 
 #if CONFIG_ESP_CONSOLE_UART_DEFAULT || CONFIG_ESP_CONSOLE_UART_CUSTOM
     esp_console_dev_uart_config_t hw_config = ESP_CONSOLE_DEV_UART_CONFIG_DEFAULT();
@@ -628,8 +627,8 @@ esp_err_t serial_cli_init(void)
     wifi_set_args.password = arg_str1(NULL, NULL, "<password>", "WiFi password");
     wifi_set_args.end = arg_end(2);
     esp_console_cmd_t wifi_set_cmd = {
-        .command = "wifi_set",
-        .help = "Set WiFi SSID and password (e.g. wifi_set MySSID MyPass)",
+        .command = "set_wifi",
+        .help = "Set WiFi SSID and password (e.g. set_wifi MySSID MyPass)",
         .func = &cmd_wifi_set,
         .argtable = &wifi_set_args,
     };
@@ -662,6 +661,30 @@ esp_err_t serial_cli_init(void)
     };
     esp_console_cmd_register(&tg_token_cmd);
 
+    /* set_feishu_creds */
+    feishu_creds_args.app_id = arg_str1(NULL, NULL, "<app_id>", "Feishu App ID");
+    feishu_creds_args.app_secret = arg_str1(NULL, NULL, "<app_secret>", "Feishu App Secret");
+    feishu_creds_args.end = arg_end(2);
+    esp_console_cmd_t feishu_creds_cmd = {
+        .command = "set_feishu_creds",
+        .help = "Set Feishu app credentials (app_id app_secret)",
+        .func = &cmd_set_feishu_creds,
+        .argtable = &feishu_creds_args,
+    };
+    esp_console_cmd_register(&feishu_creds_cmd);
+
+    /* feishu_send */
+    feishu_send_args.receive_id = arg_str1(NULL, NULL, "<receive_id>", "Feishu open_id/chat_id");
+    feishu_send_args.text = arg_str1(NULL, NULL, "<text>", "Text message (quote if contains spaces)");
+    feishu_send_args.end = arg_end(2);
+    esp_console_cmd_t feishu_send_cmd = {
+        .command = "feishu_send",
+        .help = "Send Feishu text: feishu_send <open_id|chat_id> \"hello\"",
+        .func = &cmd_feishu_send,
+        .argtable = &feishu_send_args,
+    };
+    esp_console_cmd_register(&feishu_send_cmd);
+
     /* set_api_key */
     api_key_args.key = arg_str1(NULL, NULL, "<key>", "LLM API key");
     api_key_args.end = arg_end(1);
@@ -673,17 +696,6 @@ esp_err_t serial_cli_init(void)
     };
     esp_console_cmd_register(&api_key_cmd);
 
-    /* set_api_url */
-    api_url_args.url = arg_str1(NULL, NULL, "<url>", "LLM API URL");
-    api_url_args.end = arg_end(1);
-    esp_console_cmd_t api_url_cmd = {
-        .command = "set_api_url",
-        .help = "Set LLM API URL",
-        .func = &cmd_set_api_url,
-        .argtable = &api_url_args,
-    };
-    esp_console_cmd_register(&api_url_cmd);
-
     /* set_model */
     model_args.model = arg_str1(NULL, NULL, "<model>", "Model identifier");
     model_args.end = arg_end(1);
@@ -694,18 +706,6 @@ esp_err_t serial_cli_init(void)
         .argtable = &model_args,
     };
     esp_console_cmd_register(&model_cmd);
-
-    /* set_feishu_config */
-    feishu_config_args.app_id = arg_str1(NULL, NULL, "<app_id>", "Feishu App ID");
-    feishu_config_args.app_secret = arg_str1(NULL, NULL, "<app_secret>", "Feishu App Secret");
-    feishu_config_args.end = arg_end(2);
-    esp_console_cmd_t feishu_config_cmd = {
-        .command = "set_feishu_config",
-        .help = "Set Feishu App ID and Secret",
-        .func = &cmd_set_feishu_config,
-        .argtable = &feishu_config_args,
-    };
-    esp_console_cmd_register(&feishu_config_cmd);
 
     /* set_model_provider */
     provider_args.provider = arg_str1(NULL, NULL, "<provider>", "Model provider (anthropic|openai)");
@@ -721,7 +721,7 @@ esp_err_t serial_cli_init(void)
     /* skill_list */
     esp_console_cmd_t skill_list_cmd = {
         .command = "skill_list",
-        .help = "List installed skills from /spiffs/skills/",
+        .help = "List installed skills from " MIMI_SKILLS_PREFIX,
         .func = &cmd_skill_list,
     };
     esp_console_cmd_register(&skill_list_cmd);
