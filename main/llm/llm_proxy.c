@@ -21,6 +21,8 @@ static const char *TAG = "llm";
 static char s_api_key[LLM_API_KEY_MAX_LEN] = {0};
 static char s_model[LLM_MODEL_MAX_LEN] = MIMI_LLM_DEFAULT_MODEL;
 static char s_provider[16] = MIMI_LLM_PROVIDER_DEFAULT;
+static char s_custom_api_url[256] = {0};
+static char s_custom_api_host[128] = {0};
 
 static void llm_log_payload(const char *label, const char *payload)
 {
@@ -182,6 +184,22 @@ static esp_err_t http_event_handler(esp_http_client_event_t *evt)
 
 /* ── Provider helpers ──────────────────────────────────────────── */
 
+/**
+ * Supported LLM Providers:
+ * - "anthropic"  : Anthropic Claude API
+ * - "openai"     : OpenAI GPT API
+ * - "kimi"       : Moonshot AI (Kimi)
+ * - "deepseek"   : DeepSeek
+ * - "glm"        : Zhipu AI (GLM)
+ * - "mimo"       : MiniMax (Mimo)
+ * - "custom"     : User-defined API URL (requires set_api_url)
+ */
+
+static bool provider_is_anthropic(void)
+{
+    return strcmp(s_provider, "anthropic") == 0;
+}
+
 static bool provider_is_openai(void)
 {
     return strcmp(s_provider, "openai") == 0;
@@ -192,30 +210,117 @@ static bool provider_is_kimi(void)
     return strcmp(s_provider, "kimi") == 0;
 }
 
-static bool provider_is_openai_compatible(void)
+static bool provider_is_deepseek(void)
 {
-    return provider_is_openai() || provider_is_kimi();
+    return strcmp(s_provider, "deepseek") == 0;
 }
 
+static bool provider_is_glm(void)
+{
+    return strcmp(s_provider, "glm") == 0;
+}
+
+static bool provider_is_mimo(void)
+{
+    return strcmp(s_provider, "mimo") == 0;
+}
+
+static bool provider_is_custom(void)
+{
+    return strcmp(s_provider, "custom") == 0;
+}
+
+/**
+ * Check if provider uses OpenAI-compatible API format.
+ * All providers except Anthropic use OpenAI-style chat completions API.
+ */
+static bool provider_is_openai_compatible(void)
+{
+    return !provider_is_anthropic();
+}
+
+/**
+ * Get the appropriate API URL based on current provider.
+ * Custom providers should use the URL set via NVS (handled separately).
+ */
 static const char *llm_api_url(void)
 {
+    if (s_custom_api_url[0]) {
+        return s_custom_api_url;
+    }
+    if (provider_is_openai()) {
+        return MIMI_OPENAI_API_URL;
+    }
     if (provider_is_kimi()) {
         return MIMI_KIMI_API_URL;
     }
-    return provider_is_openai() ? MIMI_OPENAI_API_URL : MIMI_LLM_API_URL;
+    if (provider_is_deepseek()) {
+        return MIMI_DEEPSEEK_API_URL;
+    }
+    if (provider_is_glm()) {
+        return MIMI_GLM_API_URL;
+    }
+    if (provider_is_mimo()) {
+        return MIMI_MIMO_API_URL;
+    }
+    /* Default to Anthropic */
+    return MIMI_LLM_API_URL;
 }
 
+/**
+ * Get the API host for proxy connections.
+ */
 static const char *llm_api_host(void)
 {
+    if (s_custom_api_host[0]) {
+        return s_custom_api_host;
+    }
+    if (provider_is_openai()) {
+        return "api.openai.com";
+    }
     if (provider_is_kimi()) {
         return "api.moonshot.cn";
     }
-    return provider_is_openai() ? "api.openai.com" : "api.anthropic.com";
+    if (provider_is_deepseek()) {
+        return "api.deepseek.com";
+    }
+    if (provider_is_glm()) {
+        return "open.bigmodel.cn";
+    }
+    if (provider_is_mimo()) {
+        return "api.minimax.chat";
+    }
+    /* Default to Anthropic */
+    return "api.anthropic.com";
 }
 
+/**
+ * Get the API path for HTTP requests.
+ * OpenAI-compatible providers use /v1/chat/completions.
+ * Anthropic uses /v1/messages.
+ */
 static const char *llm_api_path(void)
 {
     return provider_is_openai_compatible() ? "/v1/chat/completions" : "/v1/messages";
+}
+
+/**
+ * Get the default model for the current provider.
+ * Used when no model is explicitly specified.
+ */
+static const char *llm_default_model(void)
+{
+    if (provider_is_deepseek()) {
+        return MIMI_DEEPSEEK_DEFAULT_MODEL;
+    }
+    if (provider_is_glm()) {
+        return MIMI_GLM_DEFAULT_MODEL;
+    }
+    if (provider_is_mimo()) {
+        return MIMI_MIMO_DEFAULT_MODEL;
+    }
+    /* Return empty for providers that don't have a hard default */
+    return "";
 }
 
 /* ── Init ─────────────────────────────────────────────────────── */
@@ -251,11 +356,31 @@ esp_err_t llm_proxy_init(void)
         if (nvs_get_str(nvs, MIMI_NVS_KEY_PROVIDER, provider_tmp, &len) == ESP_OK && provider_tmp[0]) {
             safe_copy(s_provider, sizeof(s_provider), provider_tmp);
         }
+        /* Load custom API URL if set */
+        char url_tmp[sizeof(s_custom_api_url)] = {0};
+        len = sizeof(url_tmp);
+        if (nvs_get_str(nvs, MIMI_NVS_KEY_API_URL, url_tmp, &len) == ESP_OK && url_tmp[0]) {
+            safe_copy(s_custom_api_url, sizeof(s_custom_api_url), url_tmp);
+            /* Extract host from custom URL */
+            const char *host_start = strstr(url_tmp, "//");
+            if (host_start) {
+                host_start += 2;
+                const char *host_end = strchr(host_start, '/');
+                if (host_end) {
+                    size_t host_len = host_end - host_start;
+                    if (host_len < sizeof(s_custom_api_host)) {
+                        memcpy(s_custom_api_host, host_start, host_len);
+                        s_custom_api_host[host_len] = '\0';
+                    }
+                }
+            }
+        }
         nvs_close(nvs);
     }
 
     if (s_api_key[0]) {
-        ESP_LOGI(TAG, "LLM proxy initialized (provider: %s, model: %s)", s_provider, s_model);
+        ESP_LOGI(TAG, "LLM proxy initialized (provider: %s, model: %s, url: %s)",
+                 s_provider, s_model, s_custom_api_url[0] ? s_custom_api_url : "default");
     } else {
         ESP_LOGW(TAG, "No API key. Use CLI: set_api_key <KEY>");
     }
@@ -836,5 +961,36 @@ esp_err_t llm_set_provider(const char *provider)
 
     safe_copy(s_provider, sizeof(s_provider), provider);
     ESP_LOGI(TAG, "Provider set to: %s", s_provider);
+    return ESP_OK;
+}
+
+esp_err_t llm_set_api_url(const char *api_url)
+{
+    if (!api_url || !api_url[0]) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    nvs_handle_t nvs;
+    ESP_ERROR_CHECK(nvs_open(MIMI_NVS_LLM, NVS_READWRITE, &nvs));
+    ESP_ERROR_CHECK(nvs_set_str(nvs, MIMI_NVS_KEY_API_URL, api_url));
+    ESP_ERROR_CHECK(nvs_commit(nvs));
+    nvs_close(nvs);
+
+    safe_copy(s_custom_api_url, sizeof(s_custom_api_url), api_url);
+
+    const char *host_start = strstr(api_url, "//");
+    if (host_start) {
+        host_start += 2;
+        const char *host_end = strchr(host_start, '/');
+        if (host_end) {
+            size_t host_len = host_end - host_start;
+            if (host_len < sizeof(s_custom_api_host)) {
+                memcpy(s_custom_api_host, host_start, host_len);
+                s_custom_api_host[host_len] = '\0';
+            }
+        }
+    }
+
+    ESP_LOGI(TAG, "Custom API URL set: %s (host: %s)", s_custom_api_url, s_custom_api_host);
     return ESP_OK;
 }

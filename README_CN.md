@@ -29,7 +29,7 @@ MimiClaw 把一块小小的 ESP32-S3 开发板变成你的私人 AI 助理。插
 
 ## 工作原理
 
-![](assets/mimiclaw.png)
+!\[]\(assets/mimiclaw\.png null)
 
 你在 Telegram 发一条消息，ESP32-S3 通过 WiFi 收到后送进 Agent 循环 — LLM 思考、调用工具、读取记忆 — 再把回复发回来。同时支持 **Anthropic (Claude)** 和 **OpenAI (GPT)** 两种提供商，运行时可切换。一切都跑在一颗 $5 的芯片上，所有数据存在本地 Flash。
 
@@ -37,7 +37,7 @@ MimiClaw 把一块小小的 ESP32-S3 开发板变成你的私人 AI 助理。插
 
 ### 你需要
 
-- 一块 **ESP32-S3 开发板**，16MB Flash + 8MB PSRAM（如小智 AI 开发板，~¥30）
+- 一块 **ESP32-S3 开发板**，16MB Flash + 8MB PSRAM（如小智 AI 开发板，\~¥30）
 - 一根 **USB Type-C 数据线**
 - 一个 **Telegram Bot Token** — 在 Telegram 找 [@BotFather](https://t.me/BotFather) 创建
 - 一个 **Anthropic API Key** — 从 [console.anthropic.com](https://console.anthropic.com) 获取，或一个 **OpenAI API Key** — 从 [platform.openai.com](https://platform.openai.com) 获取
@@ -149,15 +149,6 @@ ls /dev/ttyACM*          # Linux
 idf.py -p PORT flash monitor
 ```
 
-> **注意：请插对 USB 口！** 大多数 ESP32-S3 开发板有两个 Type-C 接口，必须插标有 **USB** 的那个口（原生 USB Serial/JTAG），**不要**插标有 **COM** 的口（外部 UART 桥接）。插错口会导致烧录/监控失败。
->
-> <details>
-> <summary>查看参考图片</summary>
->
-> <img src="assets/esp32s3-usb-port.jpg" alt="请插 USB 口，不要插 COM 口" width="480" />
->
-> </details>
-
 ### 代理配置（国内用户）
 
 在国内需要代理才能访问 Telegram 和 Anthropic API。MimiClaw 内置 HTTP CONNECT 隧道支持。
@@ -210,19 +201,19 @@ mimi> restart                     # 重启
 
 大多数 ESP32-S3 开发板有 **两个 USB-C 口**：
 
-| 端口 | 用途 |
-|------|------|
+| 端口            | 用途                     |
+| ------------- | ---------------------- |
 | **USB**（JTAG） | `idf.py flash`、JTAG 调试 |
-| **COM**（UART） | **REPL 命令行**、串口控制台 |
+| **COM**（UART） | **REPL 命令行**、串口控制台     |
 
 > **REPL 必须连接 UART（COM）口。** USB（JTAG）口不支持交互式 REPL 输入。
 
 <details>
 <summary>端口详情与推荐工作流</summary>
 
-| 端口 | 标注 | 协议 |
-|------|------|------|
-| **USB** | USB / JTAG | 原生 USB Serial/JTAG |
+| 端口      | 标注         | 协议                         |
+| ------- | ---------- | -------------------------- |
+| **USB** | USB / JTAG | 原生 USB Serial/JTAG         |
 | **COM** | UART / COM | 外置 UART 桥接芯片（CP2102/CH340） |
 
 ESP-IDF 控制台默认配置为 UART 输出（`CONFIG_ESP_CONSOLE_UART_DEFAULT=y`）。
@@ -251,28 +242,28 @@ idf.py -p /dev/cu.usbserial-110 monitor
 
 MimiClaw 把所有数据存为纯文本文件，可以直接读取和编辑：
 
-| 文件 | 说明 |
-|------|------|
-| `SOUL.md` | 机器人的人设 — 编辑它来改变行为方式 |
-| `USER.md` | 关于你的信息 — 姓名、偏好、语言 |
-| `MEMORY.md` | 长期记忆 — 它应该一直记住的事 |
-| `HEARTBEAT.md` | 待办清单 — 机器人定期检查并自主执行 |
-| `cron.json` | 定时任务 — AI 创建的周期性或一次性任务 |
-| `2026-02-05.md` | 每日笔记 — 今天发生了什么 |
-| `tg_12345.jsonl` | 聊天记录 — 你和它的对话 |
+| 文件               | 说明                     |
+| ---------------- | ---------------------- |
+| `SOUL.md`        | 机器人的人设 — 编辑它来改变行为方式    |
+| `USER.md`        | 关于你的信息 — 姓名、偏好、语言      |
+| `MEMORY.md`      | 长期记忆 — 它应该一直记住的事       |
+| `HEARTBEAT.md`   | 待办清单 — 机器人定期检查并自主执行    |
+| `cron.json`      | 定时任务 — AI 创建的周期性或一次性任务 |
+| `2026-02-05.md`  | 每日笔记 — 今天发生了什么         |
+| `tg_12345.jsonl` | 聊天记录 — 你和它的对话          |
 
 ## 工具
 
 MimiClaw 同时支持 Anthropic 和 OpenAI 的工具调用 — LLM 在对话中可以调用工具，循环执行直到任务完成（ReAct 模式）。
 
-| 工具 | 说明 |
-|------|------|
-| `kimi_search` | 使用 Kimi AI 内置的网页搜索功能。适合中文内容和实时信息。无需额外 API 密钥（使用 Kimi API 密钥）。 |
-| `web_search` | 通过 Brave Search API 搜索网页，获取实时信息。需要 Brave Search API 密钥。 |
-| `get_current_time` | 通过 HTTP 获取当前日期和时间，并设置系统时钟 |
-| `cron_add` | 创建定时或一次性任务（LLM 自主创建 cron 任务） |
-| `cron_list` | 列出所有已调度的 cron 任务 |
-| `cron_remove` | 按 ID 删除 cron 任务 |
+| 工具                 | 说明                                                            |
+| ------------------ | ------------------------------------------------------------- |
+| `kimi_search`      | 使用 Kimi AI 内置的网页搜索功能。适合中文内容和实时信息。无需额外 API 密钥（使用 Kimi API 密钥）。 |
+| `web_search`       | 通过 Brave Search API 搜索网页，获取实时信息。需要 Brave Search API 密钥。       |
+| `get_current_time` | 通过 HTTP 获取当前日期和时间，并设置系统时钟                                     |
+| `cron_add`         | 创建定时或一次性任务（LLM 自主创建 cron 任务）                                  |
+| `cron_list`        | 列出所有已调度的 cron 任务                                              |
+| `cron_remove`      | 按 ID 删除 cron 任务                                               |
 
 ### 网页搜索选项
 
@@ -283,7 +274,6 @@ MimiClaw 提供两种网页搜索方式：
    - 适合中文内容和实时信息
    - 无需额外 API 密钥（使用你的 Kimi API 密钥）
    - 国内无需代理即可使用
-
 2. **Brave 搜索** (`web_search`)
    - 使用 Brave Search API
    - 适合英文内容
@@ -342,4 +332,4 @@ MIT
 
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=memovai/mimiclaw&type=Date)](https://star-history.com/#memovai/mimiclaw&Date)
+[!\[Star History Chart\](https://api.star-history.com/svg?repos=memovai/mimiclaw\&type=Date null)](https://star-history.com/#memovai/mimiclaw\&Date)

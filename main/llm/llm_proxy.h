@@ -27,6 +27,13 @@ esp_err_t llm_set_provider(const char *provider);
  */
 esp_err_t llm_set_model(const char *model);
 
+/**
+ * Save a custom API URL to NVS.
+ * When set, this URL will be used instead of the default provider URL.
+ * Automatically extracts and stores the host for proxy connections.
+ */
+esp_err_t llm_set_api_url(const char *api_url);
+
 /* ── Tool Use Support ──────────────────────────────────────────── */
 
 typedef struct {

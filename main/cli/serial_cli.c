@@ -132,6 +132,29 @@ static int cmd_set_api_key(int argc, char **argv)
     return 0;
 }
 
+/* --- set_api_url command --- */
+static struct {
+    struct arg_str *url;
+    struct arg_end *end;
+} api_url_args;
+
+static int cmd_set_api_url(int argc, char **argv)
+{
+    int nerrors = arg_parse(argc, argv, (void **)&api_url_args);
+    if (nerrors != 0) {
+        arg_print_errors(stderr, api_url_args.end, argv[0]);
+        return 1;
+    }
+    esp_err_t err = llm_set_api_url(api_url_args.url->sval[0]);
+    if (err == ESP_OK) {
+        printf("Custom API URL saved. Use 'set_model_provider custom' to activate.\n");
+    } else {
+        printf("Failed to set API URL: %s\n", esp_err_to_name(err));
+        return 1;
+    }
+    return 0;
+}
+
 /* --- set_model command --- */
 static struct {
     struct arg_str *model;
@@ -514,12 +537,15 @@ static int cmd_config_show(int argc, char **argv)
     print_config("WiFi Pass",  MIMI_NVS_WIFI,   MIMI_NVS_KEY_PASS,     MIMI_SECRET_WIFI_PASS,  true);
     print_config("TG Token",   MIMI_NVS_TG,     MIMI_NVS_KEY_TG_TOKEN, MIMI_SECRET_TG_TOKEN,   true);
     print_config("API Key",    MIMI_NVS_LLM,    MIMI_NVS_KEY_API_KEY,  MIMI_SECRET_API_KEY,    true);
+    print_config("API URL",    MIMI_NVS_LLM,    MIMI_NVS_KEY_API_URL,  "",                     false);
     print_config("Model",      MIMI_NVS_LLM,    MIMI_NVS_KEY_MODEL,    MIMI_SECRET_MODEL,      false);
     print_config("Provider",   MIMI_NVS_LLM,    MIMI_NVS_KEY_PROVIDER, MIMI_SECRET_MODEL_PROVIDER, false);
     print_config("Proxy Host", MIMI_NVS_PROXY,  MIMI_NVS_KEY_PROXY_HOST, MIMI_SECRET_PROXY_HOST, false);
     print_config("Proxy Port", MIMI_NVS_PROXY,  MIMI_NVS_KEY_PROXY_PORT, MIMI_SECRET_PROXY_PORT, false);
     print_config("Search Key", MIMI_NVS_SEARCH, MIMI_NVS_KEY_API_KEY,  MIMI_SECRET_SEARCH_KEY, true);
     printf("=============================\n");
+    printf("\nSupported providers: anthropic, openai, kimi, deepseek, glm, mimo, custom\n");
+    printf("For custom providers, use: set_api_url <url> && set_model_provider custom\n");
     return 0;
 }
 
@@ -696,6 +722,17 @@ esp_err_t serial_cli_init(void)
     };
     esp_console_cmd_register(&api_key_cmd);
 
+    /* set_api_url */
+    api_url_args.url = arg_str1(NULL, NULL, "<url>", "Custom API URL (e.g. https://api.example.com/v1/chat/completions)");
+    api_url_args.end = arg_end(1);
+    esp_console_cmd_t api_url_cmd = {
+        .command = "set_api_url",
+        .help = "Set custom API URL (use 'set_model_provider custom' to activate)",
+        .func = &cmd_set_api_url,
+        .argtable = &api_url_args,
+    };
+    esp_console_cmd_register(&api_url_cmd);
+
     /* set_model */
     model_args.model = arg_str1(NULL, NULL, "<model>", "Model identifier");
     model_args.end = arg_end(1);
@@ -708,11 +745,12 @@ esp_err_t serial_cli_init(void)
     esp_console_cmd_register(&model_cmd);
 
     /* set_model_provider */
-    provider_args.provider = arg_str1(NULL, NULL, "<provider>", "Model provider (anthropic|openai)");
+    provider_args.provider = arg_str1(NULL, NULL, "<provider>",
+        "Provider: anthropic|openai|kimi|deepseek|glm|mimo|custom");
     provider_args.end = arg_end(1);
     esp_console_cmd_t provider_cmd = {
         .command = "set_model_provider",
-        .help = "Set LLM model provider (default: " MIMI_LLM_PROVIDER_DEFAULT ")",
+        .help = "Set LLM provider (anthropic/openai/kimi/deepseek/glm/mimo/custom)",
         .func = &cmd_set_model_provider,
         .argtable = &provider_args,
     };

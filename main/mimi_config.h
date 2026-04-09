@@ -79,14 +79,34 @@
 /* Timezone (POSIX TZ format) */
 #define MIMI_TIMEZONE                "PST8PDT,M3.2.0,M11.1.0"
 
-/* LLM */
+/* LLM - Multi-Provider Support */
 #define MIMI_LLM_DEFAULT_MODEL       "claude-opus-4-5"
 #define MIMI_LLM_PROVIDER_DEFAULT    "anthropic"
 #define MIMI_LLM_MAX_TOKENS          4096
+
+/* Anthropic (Claude) */
 #define MIMI_LLM_API_URL             "https://api.anthropic.com/v1/messages"
-#define MIMI_OPENAI_API_URL          "https://api.openai.com/v1/chat/completions"
-#define MIMI_KIMI_API_URL            "https://api.moonshot.cn/v1/chat/completions"
 #define MIMI_LLM_API_VERSION         "2023-06-01"
+
+/* OpenAI (GPT) */
+#define MIMI_OPENAI_API_URL          "https://api.openai.com/v1/chat/completions"
+
+/* Kimi (Moonshot AI) */
+#define MIMI_KIMI_API_URL            "https://api.moonshot.cn/v1/chat/completions"
+
+/* DeepSeek */
+#define MIMI_DEEPSEEK_API_URL        "https://api.deepseek.com/v1/chat/completions"
+#define MIMI_DEEPSEEK_DEFAULT_MODEL   "deepseek-chat"
+
+/* GLM (Zhipu AI) */
+#define MIMI_GLM_API_URL             "https://open.bigmodel.cn/api/paas/v4/chat/completions"
+#define MIMI_GLM_DEFAULT_MODEL        "glm-4"
+
+/* Mimo */
+#define MIMI_MIMO_API_URL            "https://api.minimax.chat/v1/chat/Completions"
+#define MIMI_MIMO_DEFAULT_MODEL       "M2.2"
+
+/* Streaming buffer */
 #define MIMI_LLM_STREAM_BUF_SIZE     (32 * 1024)
 #define MIMI_LLM_LOG_VERBOSE_PAYLOAD 0
 #define MIMI_LLM_LOG_PREVIEW_BYTES   160
@@ -144,5 +164,6 @@
 #define MIMI_NVS_KEY_API_KEY         "api_key"
 #define MIMI_NVS_KEY_MODEL           "model"
 #define MIMI_NVS_KEY_PROVIDER        "provider"
+#define MIMI_NVS_KEY_API_URL         "api_url"
 #define MIMI_NVS_KEY_PROXY_HOST      "host"
 #define MIMI_NVS_KEY_PROXY_PORT      "port"
