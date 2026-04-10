@@ -524,18 +524,25 @@ static cJSON *convert_tools_openai(const char *tools_json)
 
         /* Special handling for kimi_search: use builtin_function.$web_search */
         if (strcmp(name->valuestring, "kimi_search") == 0) {
-            if (!provider_is_kimi()) {
+            if (provider_is_glm()) {
+                cJSON_AddStringToObject(wrap, "type", "web_search");
+                cJSON *ws = cJSON_CreateObject();
+                cJSON_AddBoolToObject(ws, "enable", true);
+                cJSON_AddBoolToObject(ws, "search_result", true);
+                cJSON_AddItemToObject(wrap, "web_search", ws);
+            } else if (provider_is_kimi()) {
+                cJSON_AddStringToObject(wrap, "type", "builtin_function");
+                /* function must be an object even for builtin_function */
+                cJSON *func = cJSON_CreateObject();
+                cJSON_AddStringToObject(func, "name", "$web_search");
+                if (desc && cJSON_IsString(desc)) {
+                    cJSON_AddStringToObject(func, "description", desc->valuestring);
+                }
+                cJSON_AddItemToObject(wrap, "function", func);
+            } else {
                 cJSON_Delete(wrap);
                 continue;
             }
-            cJSON_AddStringToObject(wrap, "type", "builtin_function");
-            /* function must be an object even for builtin_function */
-            cJSON *func = cJSON_CreateObject();
-            cJSON_AddStringToObject(func, "name", "$web_search");
-            if (desc && cJSON_IsString(desc)) {
-                cJSON_AddStringToObject(func, "description", desc->valuestring);
-            }
-            cJSON_AddItemToObject(wrap, "function", func);
         } else {
             /* Standard function format for other tools */
             cJSON *func = cJSON_CreateObject();
@@ -745,7 +752,7 @@ esp_err_t llm_chat_tools(const char *system_prompt,
         if (tools_json) {
             cJSON *tools = cJSON_Parse(tools_json);
             if (tools) {
-                if (!provider_is_kimi()) {
+                if (!provider_is_kimi() && !provider_is_glm()) {
                     cJSON *tool;
                     cJSON *to_delete = NULL;
                     cJSON_ArrayForEach(tool, tools) {
