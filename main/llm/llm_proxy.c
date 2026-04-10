@@ -261,7 +261,7 @@ static const char *llm_api_url(void)
         return MIMI_GLM_API_URL;
     }
     if (provider_is_mimo()) {
-        return MIMI_MIMO_API_URL;
+        return MIMI_MIMAX_API_URL;
     }
     /* Default to Anthropic */
     return MIMI_LLM_API_URL;
@@ -287,7 +287,7 @@ static const char *llm_api_host(void)
     if (provider_is_glm()) {
         return "open.bigmodel.cn";
     }
-    if (provider_is_mimo()) {
+    if (provider_is_minimax()) {
         return "api.minimax.chat";
     }
     /* Default to Anthropic */
@@ -316,8 +316,8 @@ static const char *llm_default_model(void)
     if (provider_is_glm()) {
         return MIMI_GLM_DEFAULT_MODEL;
     }
-    if (provider_is_mimo()) {
-        return MIMI_MIMO_DEFAULT_MODEL;
+    if (provider_is_minimax()) {
+        return MIMI_MIMAX_DEFAULT_MODEL;    
     }
     /* Return empty for providers that don't have a hard default */
     return "";

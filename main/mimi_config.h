@@ -102,9 +102,9 @@
 #define MIMI_GLM_API_URL             "https://open.bigmodel.cn/api/paas/v4/chat/completions"
 #define MIMI_GLM_DEFAULT_MODEL        "glm-4"
 
-/* Mimo */
-#define MIMI_MIMO_API_URL            "https://api.minimax.chat/v1/chat/Completions"
-#define MIMI_MIMO_DEFAULT_MODEL       "M2.2"
+/* Mimax (Minimax AI) */
+#define MIMI_MIMAX_API_URL            "https://api.minimax.chat/v1/chat/Completions"
+#define MIMI_MIMAX_DEFAULT_MODEL       "MiniMax-M2.7"
 
 /* Streaming buffer */
 #define MIMI_LLM_STREAM_BUF_SIZE     (32 * 1024)
