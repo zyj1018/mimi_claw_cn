@@ -220,9 +220,9 @@ static bool provider_is_glm(void)
     return strcmp(s_provider, "glm") == 0;
 }
 
-static bool provider_is_mimo(void)
+static bool provider_is_minimax(void)
 {
-    return strcmp(s_provider, "mimo") == 0;
+    return strcmp(s_provider, "minimax") == 0;
 }
 
 static bool provider_is_custom(void)
@@ -260,7 +260,7 @@ static const char *llm_api_url(void)
     if (provider_is_glm()) {
         return MIMI_GLM_API_URL;
     }
-    if (provider_is_mimo()) {
+    if (provider_is_minimax()) {
         return MIMI_MIMAX_API_URL;
     }
     /* Default to Anthropic */
@@ -330,6 +330,7 @@ esp_err_t llm_proxy_init(void)
     /* Start with build-time defaults */
     if (MIMI_SECRET_API_KEY[0] != '\0') {
         safe_copy(s_api_key, sizeof(s_api_key), MIMI_SECRET_API_KEY);
+        ESP_LOGI(TAG, "API Key: %s", s_api_key);
     }
     if (MIMI_SECRET_MODEL[0] != '\0') {
         safe_copy(s_model, sizeof(s_model), MIMI_SECRET_MODEL);
