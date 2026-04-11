@@ -103,7 +103,7 @@
 #define MIMI_GLM_DEFAULT_MODEL        "glm-4"
 
 /* Mimax (Minimax AI) */
-#define MIMI_MIMAX_API_URL            "https://api.minimax/v1/text/chatcompletion_v2"
+#define MIMI_MIMAX_API_URL            "https://api.minimax.chat/v1/text/chatcompletion_v2"
 #define MIMI_MIMAX_DEFAULT_MODEL       "MiniMax-M2.7"
 
 /* Streaming buffer */
